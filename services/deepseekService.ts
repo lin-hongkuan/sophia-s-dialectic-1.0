@@ -3,7 +3,7 @@ import { AnalysisResult } from "../types";
 const apiKey = process.env.API_KEY || '';
 
 // DeepSeek API 配置
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+const DEEPSEEK_API_URL = 'https://api.siliconflow.cn/v1/chat/completions';
 
 export const analyzeTopic = async (userTopic: string): Promise<AnalysisResult> => {
   if (!apiKey) {
