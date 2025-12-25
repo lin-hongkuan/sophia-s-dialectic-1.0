@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       // GitHub Pages 需要设置 base 路径
-      base: process.env.GITHUB_ACTIONS ? '/sophia-dialectic/' : '/',
+      base: './', 
       server: {
         port: 3000,
         host: '0.0.0.0',
