@@ -85,7 +85,7 @@ export const analyzeTopic = async (userTopic: string): Promise<AnalysisResult> =
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat', // DeepSeek V3 模型
+        model: 'deepseek-ai/DeepSeek-V3.2', // SiliconFlow Model Name
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage }
@@ -154,7 +154,7 @@ export const getReflectionFeedback = async (topic: string, userReflection: strin
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek-ai/DeepSeek-V3.2',
         messages: [
           {
             role: 'system',
