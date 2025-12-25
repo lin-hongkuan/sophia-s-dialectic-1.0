@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import PhilosopherCard from './PhilosopherCard';
 import { ChevronDown, ArrowRight, Sparkles, BookOpen, Layers } from 'lucide-react';
-import { getReflectionFeedback } from '../services/geminiService';
+import { getReflectionFeedback } from '../services/deepseekService';
 
 interface ArenaProps {
   data: AnalysisResult;

@@ -1,5 +1,5 @@
 {
-  "name": "sophia's-dialectic",
+  "name": "sophia-dialectic",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,6 @@
   "dependencies": {
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "@google/genai": "0.2.0",
     "lucide-react": "0.263.1",
     "three": "0.160.0",
     "@react-three/fiber": "8.15.12",
@@ -19,6 +18,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/three": "^0.160.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

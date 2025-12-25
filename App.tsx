@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { analyzeTopic } from './services/geminiService';
+import { analyzeTopic } from './services/deepseekService';
 import { AnalysisResult } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
@@ -159,7 +159,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest relative z-10 opacity-60 hover:opacity-100 transition-opacity">
-        <p>© 2024 Sophia's Dialectic. Powered by Gemini & The Ancients.</p>
+        <p>© 2024 Sophia's Dialectic. Powered by DeepSeek & The Ancients.</p>
       </footer>
     </div>
   );
