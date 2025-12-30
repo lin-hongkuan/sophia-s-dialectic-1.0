@@ -75,7 +75,14 @@ export const analyzeTopic = async (userTopic: string): Promise<AnalysisResult> =
     }
   `;
 
-  const userMessage = `Perform a surgical, deep-tissue philosophical dissection of the user's topic: "${userTopic}". Remember to output ONLY valid JSON.`;
+  const userMessage = `Perform a surgical, deep-tissue philosophical dissection of the user's topic: "${userTopic}". 
+  
+  IMPORTANT: The user is complaining that previous outputs were too short. 
+  You MUST write EXTENSIVELY. Do not summarize. Do not be concise. 
+  Expand on every point. Use flowery, academic, and rigorous language to fill the space.
+  Each philosopher's argument MUST be a mini-essay of at least 2000 characters.
+  
+  Remember to output ONLY valid JSON.`;
 
   try {
     const response = await fetch(DEEPSEEK_API_URL, {

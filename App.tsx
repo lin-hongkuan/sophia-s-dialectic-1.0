@@ -121,7 +121,7 @@ const App: React.FC = () => {
 
             <div className="mt-8 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-2">
               <span className="w-full text-center text-[10px] md:text-xs font-mono text-museum-400 uppercase tracking-widest mb-1 md:mb-2">Philosophy as a Service</span>
-              {['玩消失是不对的吗？', '我应该追求金钱还是激情？', 'AI 会取代艺术吗？', '为什么我感到孤独？'].map((suggestion) => (
+              {['如何证明你不是缸中之脑', '我们应该生孩子吗？', '为什么有性别不止有两个？', '如何看待西西弗斯','我们真的幸福吗？'].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setTopic(suggestion)}
