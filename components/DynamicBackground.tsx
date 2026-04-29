@@ -94,11 +94,15 @@ const MacroscopicWave = ({ frontOnly = false }: { frontOnly?: boolean }) => {
   );
 };
 
-const BackgroundScene: React.FC = () => {
+interface BackgroundSceneProps {
+  showFrontOcclusion?: boolean;
+}
+
+const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = false }) => {
   return (
     <>
       <div className="fixed inset-0 z-0 opacity-30 pointer-events-none">
-        <Canvas camera={{ position: [0, 0, 6], fov: 45 }}>
+        <Canvas camera={{ position: [0, 0, 6], fov: 45 }} style={{ pointerEvents: 'none' }}>
           <ResponsiveCamera />
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
@@ -119,20 +123,23 @@ const BackgroundScene: React.FC = () => {
         </Canvas>
       </div>
 
-      <div className="fixed inset-0 z-20 opacity-30 pointer-events-none">
-        <Canvas
-          camera={{ position: [0, 0, 6], fov: 45 }}
-          gl={{ alpha: true, antialias: true }}
-          onCreated={({ gl }) => {
-            gl.localClippingEnabled = true;
-          }}
-        >
-          <ResponsiveCamera />
-          <ambientLight intensity={0.5} />
-          <pointLight position={[10, 10, 10]} intensity={1} />
-          <MacroscopicWave frontOnly />
-        </Canvas>
-      </div>
+      {showFrontOcclusion && (
+        <div className="fixed inset-0 z-20 opacity-30 pointer-events-none">
+          <Canvas
+            camera={{ position: [0, 0, 6], fov: 45 }}
+            gl={{ alpha: true, antialias: true }}
+            style={{ pointerEvents: 'none' }}
+            onCreated={({ gl }) => {
+              gl.localClippingEnabled = true;
+            }}
+          >
+            <ResponsiveCamera />
+            <ambientLight intensity={0.5} />
+            <pointLight position={[10, 10, 10]} intensity={1} />
+            <MacroscopicWave frontOnly />
+          </Canvas>
+        </div>
+      )}
     </>
   );
 };

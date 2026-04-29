@@ -59,9 +59,11 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
         </div>
         <h1 className="font-serif text-4xl md:text-6xl text-museum-900 leading-tight">{data.philosophical_title}</h1>
         <div className="max-w-4xl mx-auto mt-6">
-          <p className="text-museum-800 italic text-lg leading-relaxed whitespace-pre-line text-justify bg-white/60 p-6 md:p-8 rounded-xl backdrop-blur-sm border border-museum-100 shadow-sm">
-            {data.introduction}
-          </p>
+          <div className="bg-white/80 backdrop-blur-md border border-museum-200 shadow-sm p-6 md:p-8">
+            <p className="text-museum-800 italic text-lg leading-relaxed whitespace-pre-line text-justify">
+              {data.introduction}
+            </p>
+          </div>
         </div>
         {isGenerating && (
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-museum-900 text-museum-50 rounded-full text-xs font-mono uppercase tracking-widest">
