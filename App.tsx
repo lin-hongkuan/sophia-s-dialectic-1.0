@@ -68,6 +68,10 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBo
     }
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[Sophia] render error boundary caught:', error, info.componentStack);
+  }
+
   render() {
     if (this.state.error) {
       return (

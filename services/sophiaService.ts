@@ -192,6 +192,199 @@ const normalizeKind = (kind: string | undefined): VoiceKind => {
   return 'philosopher';
 };
 
+const isRecord = (value: unknown): value is Record<string, any> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const toText = (value: unknown, fallback = ''): string => {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+};
+
+const toTextArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map((item) => toText(item)).filter(Boolean) : [];
+
+const normalizeQuestionFrame = (value: unknown, topic: string, title: string): AnalysisOutline['questionFrame'] => {
+  const source = isRecord(value) ? value : {};
+  return {
+    original: toText(source.original, topic),
+    bigQuestion: toText(source.bigQuestion, title || topic),
+    plainTranslation: toText(source.plainTranslation),
+    keywords: toTextArray(source.keywords),
+  };
+};
+
+const normalizeProgramStructure = (value: unknown): AnalysisOutline['programStructure'] =>
+  Array.isArray(value)
+    ? value.map((item, index) => {
+      const source = isRecord(item) ? item : {};
+      return {
+        id: toText(source.id, `section-${index + 1}`),
+        title: toText(source.title, `阅读节点 ${index + 1}`),
+        description: toText(source.description),
+      };
+    })
+    : [];
+
+const normalizeRouteMap = (value: unknown): RouteNode[] =>
+  Array.isArray(value)
+    ? value.map((item, index) => {
+      const source = isRecord(item) ? item : {};
+      const node: RouteNode = {
+        id: toText(source.id, `route-${index + 1}`),
+        title: toText(source.title, `路线节点 ${index + 1}`),
+        role: toText(source.role, '节点'),
+        plain: toText(source.plain),
+        philosophical: toText(source.philosophical),
+      };
+      const tension = toText(source.tension);
+      const nextQuestion = toText(source.nextQuestion);
+      if (tension) node.tension = tension;
+      if (nextQuestion) node.nextQuestion = nextQuestion;
+      return node;
+    })
+    : [];
+
+const normalizeVoicePlans = (value: unknown): AnalysisOutline['voicePlans'] =>
+  Array.isArray(value)
+    ? value.slice(0, 5).map((voice, index) => {
+      const source = isRecord(voice) ? voice : {};
+      return {
+        id: toText(source.id, `voice-${index + 1}`),
+        name: toText(source.name, `思想声音 ${index + 1}`),
+        kind: normalizeKind(toText(source.kind)),
+        school: toText(source.school),
+        role: toText(source.role, '思想声音'),
+        coreConcept: toText(source.coreConcept),
+        oneLine: toText(source.oneLine, toText(source.stance)),
+        stance: toText(source.stance, toText(source.oneLine)),
+        diagnosis: toText(source.diagnosis),
+        prescription: toText(source.prescription),
+        thesis: toText(source.thesis),
+        critique: toText(source.critique),
+      };
+    })
+    : [];
+
+const normalizeSeminarMatrix = (value: unknown): AnalysisOutline['seminarMatrix'] => {
+  if (!isRecord(value)) return undefined;
+  const cells = Array.isArray(value.cells)
+    ? value.cells.map((cell, index) => {
+      const source = isRecord(cell) ? cell : {};
+      return {
+        id: toText(source.id, `cell-${index + 1}`),
+        factualOption: toText(source.factualOption),
+        valueOption: toText(source.valueOption),
+        label: toText(source.label, `位置 ${index + 1}`),
+        description: toText(source.description),
+      };
+    })
+    : [];
+
+  const matrix = {
+    factualQuestion: toText(value.factualQuestion),
+    valueQuestion: toText(value.valueQuestion),
+    factualOptions: toTextArray(value.factualOptions),
+    valueOptions: toTextArray(value.valueOptions),
+    cells,
+  };
+
+  return matrix.factualQuestion || matrix.valueQuestion || matrix.cells.length > 0 ? matrix : undefined;
+};
+
+const normalizeDiagnosisFrame = (value: unknown): AnalysisOutline['diagnosisFrame'] => {
+  if (!isRecord(value)) return undefined;
+  const doctors = Array.isArray(value.doctors)
+    ? value.doctors.map((doctor, index) => {
+      const source = isRecord(doctor) ? doctor : {};
+      return {
+        voiceId: toText(source.voiceId, `voice-${index + 1}`),
+        diagnosis: toText(source.diagnosis),
+        prescription: toText(source.prescription),
+      };
+    })
+    : [];
+
+  const frame = {
+    symptomTitle: toText(value.symptomTitle),
+    symptoms: toTextArray(value.symptoms),
+    framing: toText(value.framing),
+    doctors,
+  };
+
+  return frame.symptomTitle || frame.symptoms.length > 0 || frame.framing || frame.doctors.length > 0 ? frame : undefined;
+};
+
+const normalizeThoughtExperiment = (value: unknown): AnalysisOutline['thoughtExperiment'] => {
+  if (!isRecord(value)) return undefined;
+  const responseMap = Array.isArray(value.responseMap)
+    ? value.responseMap.map((response, index) => {
+      const source = isRecord(response) ? response : {};
+      return {
+        voiceId: toText(source.voiceId, `voice-${index + 1}`),
+        route: toText(source.route),
+      };
+    })
+    : [];
+  const poeticVersion = toText(value.poeticVersion);
+  const frame = {
+    ...(poeticVersion ? { poeticVersion } : {}),
+    unsettlingVersion: toText(value.unsettlingVersion),
+    coreChallenge: toText(value.coreChallenge),
+    stakes: toText(value.stakes),
+    responseMap,
+  };
+
+  return frame.poeticVersion || frame.unsettlingVersion || frame.coreChallenge || frame.stakes || frame.responseMap.length > 0 ? frame : undefined;
+};
+
+const normalizeTensions = (value: unknown): TensionFocus[] =>
+  Array.isArray(value)
+    ? value.map((item, index) => {
+      const source = isRecord(item) ? item : {};
+      return {
+        id: toText(source.id, `tension-${index + 1}`),
+        title: toText(source.title, `分歧 ${index + 1}`),
+        content: toText(source.content),
+        relatedVoiceIds: toTextArray(source.relatedVoiceIds),
+      };
+    })
+    : [];
+
+const normalizeKeywords = (value: unknown): KeywordExplainer[] =>
+  Array.isArray(value)
+    ? value.map((item, index) => {
+      const source = isRecord(item) ? item : {};
+      return {
+        id: toText(source.id, `keyword-${index + 1}`),
+        term: toText(source.term, `关键词 ${index + 1}`),
+        meaning: toText(source.meaning),
+        importance: toText(source.importance),
+      };
+    })
+    : [];
+
+const normalizeFollowUps = (value: unknown): AnalysisResult['followUps'] =>
+  Array.isArray(value)
+    ? value.map((item, index) => {
+      const source = isRecord(item) ? item : {};
+      return {
+        id: toText(source.id, `follow-${index + 1}`),
+        question: toText(source.question),
+        reason: toText(source.reason),
+      };
+    }).filter((item) => item.question)
+    : [];
+
+const normalizeConclusion = (value: unknown): OpenConclusion => {
+  if (!isRecord(value)) return emptyConclusion;
+  return {
+    summary: toText(value.summary),
+    openQuestion: toText(value.openQuestion),
+    realLifeReturn: toText(value.realLifeReturn),
+  };
+};
+
 const outlineSystemPrompt = `
 你是 Sophia，一个中文哲学写作者、问题结构编辑和思想地图设计者。你的任务不是写百科词条，而是把用户的问题整理成一份可阅读、可展开的哲学分析页面。
 
@@ -285,40 +478,23 @@ voicePlans 选择 2-5 个，必须足够贴题。不要生成 routeMap.nextQuest
 
   const mode = normalizeMode(raw.mode);
   const now = new Date().toISOString();
+  const title = toText(raw.philosophical_title, `大问题：${topic}`);
   return {
     id: makeId('analysis'),
     createdAt: now,
     topic,
-    philosophical_title: raw.philosophical_title || `大问题：${topic}`,
+    philosophical_title: title,
     mode,
-    modeLabel: raw.modeLabel || MODE_LABELS[mode],
-    introduction: raw.introduction || '',
-    questionFrame: {
-      original: raw.questionFrame?.original || topic,
-      bigQuestion: raw.questionFrame?.bigQuestion || raw.philosophical_title || topic,
-      plainTranslation: raw.questionFrame?.plainTranslation || '',
-      keywords: Array.isArray(raw.questionFrame?.keywords) ? raw.questionFrame.keywords : [],
-    },
-    programStructure: Array.isArray(raw.programStructure) ? raw.programStructure : [],
-    routeMap: Array.isArray(raw.routeMap) ? raw.routeMap : [],
-    voicePlans: (Array.isArray(raw.voicePlans) ? raw.voicePlans : []).slice(0, 5).map((voice: any, index: number) => ({
-      id: voice.id || `voice-${index + 1}`,
-      name: voice.name || `思想声音 ${index + 1}`,
-      kind: normalizeKind(voice.kind),
-      school: voice.school || '',
-      role: voice.role || '思想声音',
-      coreConcept: voice.coreConcept || '',
-      oneLine: voice.oneLine || voice.stance || '',
-      stance: voice.stance || voice.oneLine || '',
-      diagnosis: voice.diagnosis || '',
-      prescription: voice.prescription || '',
-      thesis: voice.thesis || '',
-      critique: voice.critique || '',
-    })),
-    seminarMatrix: raw.seminarMatrix,
-    diagnosisFrame: raw.diagnosisFrame,
-    thoughtExperiment: raw.thoughtExperiment,
-    reasoning_trace: Array.isArray(raw.reasoning_trace) ? raw.reasoning_trace : [],
+    modeLabel: toText(raw.modeLabel, MODE_LABELS[mode]),
+    introduction: toText(raw.introduction),
+    questionFrame: normalizeQuestionFrame(raw.questionFrame, topic, title),
+    programStructure: normalizeProgramStructure(raw.programStructure),
+    routeMap: normalizeRouteMap(raw.routeMap),
+    voicePlans: normalizeVoicePlans(raw.voicePlans),
+    seminarMatrix: normalizeSeminarMatrix(raw.seminarMatrix),
+    diagnosisFrame: normalizeDiagnosisFrame(raw.diagnosisFrame),
+    thoughtExperiment: normalizeThoughtExperiment(raw.thoughtExperiment),
+    reasoning_trace: toTextArray(raw.reasoning_trace),
   };
 };
 
@@ -416,7 +592,8 @@ const generateRouteDetails = async (topic: string, outline: AnalysisOutline): Pr
 请补全 routeMap，每个节点 plain 120-220字，philosophical 120-220字，必须有清晰推进。不要生成 nextQuestion 字段，继续追问统一留给 followUps。输出 JSON：{"routeMap":[...]}`,
     },
   ], 2500).catch(() => ({ routeMap: outline.routeMap }));
-  return Array.isArray(result.routeMap) ? result.routeMap : outline.routeMap;
+  const routeMap = normalizeRouteMap(result.routeMap);
+  return routeMap.length > 0 ? routeMap : outline.routeMap;
 };
 
 const generateSynthesis = async (
@@ -431,7 +608,7 @@ const generateSynthesis = async (
     conclusion: emptyConclusion,
   };
 
-  return callChatJson<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>([
+  const raw = await callChatJson<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>([
     { role: 'system', content: '你是哲学分析编辑。基于已生成的思想声音摘要，生成最终综合判断。只输出 JSON。' },
     {
       role: 'user',
@@ -452,6 +629,13 @@ ${voices.map((v) => `${v.name}: ${v.summaryForSynthesis}`).join('\n')}
 followUps 必须是对当前分析的延伸，不要像另一个全新选题。`,
     },
   ], 3500).catch(() => fallback);
+
+  return {
+    tensions: normalizeTensions(raw.tensions),
+    keywords: normalizeKeywords(raw.keywords),
+    followUps: normalizeFollowUps(raw.followUps),
+    conclusion: normalizeConclusion(raw.conclusion),
+  };
 };
 
 export const createPartialResult = (outline: AnalysisOutline): AnalysisResult => ({
@@ -602,10 +786,10 @@ export const analyzeTopic = async (
     result = {
       ...result,
       voices: result.voices.map((placeholder) => generatedVoices.find((voice) => voice.id === placeholder.id) || placeholder),
-      tensions: Array.isArray(synthesis.tensions) ? synthesis.tensions as TensionFocus[] : [],
-      keywords: Array.isArray(synthesis.keywords) ? synthesis.keywords as KeywordExplainer[] : [],
-      followUps: Array.isArray(synthesis.followUps) ? synthesis.followUps : [],
-      conclusion: synthesis.conclusion || emptyConclusion as OpenConclusion,
+      tensions: normalizeTensions(synthesis.tensions),
+      keywords: normalizeKeywords(synthesis.keywords),
+      followUps: normalizeFollowUps(synthesis.followUps),
+      conclusion: normalizeConclusion(synthesis.conclusion),
     };
 
     report({

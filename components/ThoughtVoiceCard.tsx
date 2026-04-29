@@ -46,6 +46,10 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
     };
 
     updateHeight();
+    if (typeof ResizeObserver === 'undefined') {
+      return () => window.cancelAnimationFrame(frameId);
+    }
+
     const observer = new ResizeObserver(updateHeight);
     observer.observe(content);
 
