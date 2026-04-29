@@ -1,20 +1,34 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Sophia's Dialectic
 
-# Run and deploy your AI Studio app
+A Vite + React philosophical program generator. Enter a modern anxiety or philosophical question, and Sophia turns it into a structured, long-form dialectical reading experience.
 
-This contains everything you need to run your app locally.
+## Run locally
 
-View your app in AI Studio: https://ai.studio/apps/drive/1b3MtjdQrYc5TZlqRXCaoELeQlf4zBeq7
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+Prerequisites: Node.js 20+
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+
+```bash
+npm install
+```
+
+2. Create `.env.local`:
+
+```env
+SOPHIA_API_KEY=your_key_here
+SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
+SOPHIA_API_MODEL=gpt-5.4-mini
+SOPHIA_API_PROVIDER=OpenAI-compatible
+```
+
+3. Start the dev server:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:7878`.
+
+## Notes
+
+This is currently a frontend-only app. Any API key injected by Vite will be visible in the browser bundle, so use a limited key for public deployments. For production-grade secrecy, add a server-side proxy such as Cloudflare Workers or Vercel Functions.

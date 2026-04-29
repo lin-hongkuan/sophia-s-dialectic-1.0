@@ -36,7 +36,10 @@ jobs:
         run: npm run build
         env:
           GITHUB_ACTIONS: true
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SOPHIA_API_KEY: ${{ secrets.SOPHIA_API_KEY }}
+          SOPHIA_API_BASE_URL: https://api.linhongkuan.com/v1
+          SOPHIA_API_MODEL: gpt-5.4-mini
+          SOPHIA_API_PROVIDER: OpenAI-compatible
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

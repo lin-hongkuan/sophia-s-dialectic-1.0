@@ -1,169 +1,101 @@
 # Sophia's Dialectic - GitHub Pages 部署指南
 
-## 🚀 快速开始
+## 本地预览
 
-### 本地预览
-
-1. **安装依赖**
-   ```bash
-   npm install
-   ```
-
-2. **配置 API Key**
-   
-   编辑 `.env.local` 文件，将 `YOUR_DEEPSEEK_API_KEY_HERE` 替换为你的 DeepSeek API Key：
-   ```
-   DEEPSEEK_API_KEY=your_actual_api_key_here
-   ```
-   
-   > 获取 DeepSeek API Key: https://platform.deepseek.com/
-
-3. **启动开发服务器**
-   ```bash
-   npm run dev
-   ```
-   
-   打开浏览器访问 `http://localhost:3000`
-
-4. **构建预览**
-   ```bash
-   npm run build
-   npm run preview
-   ```
-
----
-
-## 📦 部署到 GitHub Pages
-
-### 步骤 1: 创建 GitHub 仓库
-
-1. 在 GitHub 上创建一个新仓库，命名为 `sophia-dialectic`（或你喜欢的名字）
-2. 如果仓库名称不同，需要修改 `vite.config.ts` 中的 `base` 路径
-
-### 步骤 2: 配置 GitHub Secrets
-
-1. 进入你的 GitHub 仓库
-2. 点击 **Settings** → **Secrets and variables** → **Actions**
-3. 点击 **New repository secret**
-4. 添加一个 secret:
-   - **Name**: `DEEPSEEK_API_KEY`
-   - **Value**: 你的 DeepSeek API Key
-
-### 步骤 3: 启用 GitHub Pages
-
-1. 进入仓库 **Settings** → **Pages**
-2. 在 **Source** 下选择 **GitHub Actions**
-
-### 步骤 4: 推送代码
+1. 安装依赖
 
 ```bash
-# 初始化 Git（如果还没有）
-git init
-
-# 添加远程仓库
-git remote add origin https://github.com/YOUR_USERNAME/sophia-dialectic.git
-
-# 添加所有文件
-git add .
-
-# 提交
-git commit -m "Initial commit: Sophia's Dialectic with DeepSeek API"
-
-# 推送到 main 分支
-git push -u origin main
+npm install
 ```
 
-### 步骤 5: 等待部署
+2. 配置 `.env.local`
 
-1. 进入仓库的 **Actions** 标签页
-2. 查看 "Deploy to GitHub Pages" 工作流的运行状态
-3. 部署完成后，访问 `https://YOUR_USERNAME.github.io/sophia-dialectic/`
-
----
-
-## ⚠️ 重要安全提示
-
-### API Key 安全
-
-由于这是一个纯前端应用，API Key 会被打包到 JavaScript 中。这意味着：
-
-1. **不要使用生产环境的高额度 API Key**
-2. **建议在 DeepSeek 平台设置 API Key 的使用限额**
-3. **定期轮换 API Key**
-
-### 更安全的架构（可选）
-
-如果你担心 API Key 暴露，可以考虑：
-
-1. **使用 Cloudflare Workers 或 Vercel Functions 作为代理**
-2. **部署到 Vercel/Netlify 并使用服务端函数**
-
----
-
-## 🔧 自定义配置
-
-### 修改仓库名称
-
-如果你的仓库名称不是 `sophia-dialectic`，需要修改 `vite.config.ts`：
-
-```typescript
-base: process.env.GITHUB_ACTIONS ? '/your-repo-name/' : '/',
+```env
+SOPHIA_API_KEY=your_key_here
+SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
+SOPHIA_API_MODEL=gpt-5.4-mini
+SOPHIA_API_PROVIDER=OpenAI-compatible
 ```
 
-### 环境变量
+3. 启动开发服务器
 
-| 变量名 | 说明 |
-|--------|------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
-
----
-
-## 📁 项目结构
-
-```
-sophia-dialectic/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml      # GitHub Actions 部署配置
-├── components/
-│   ├── Arena.tsx           # 辩论场组件
-│   ├── DynamicBackground.tsx # 3D 动态背景
-│   ├── PhilosopherCard.tsx # 哲学家卡片
-│   └── ReasoningDisplay.tsx # 推理过程展示
-├── services/
-│   └── deepseekService.ts  # DeepSeek API 服务
-├── .env.local              # 本地环境变量（不上传）
-├── App.tsx                 # 主应用组件
-├── index.html              # HTML 入口
-├── index.tsx               # React 入口
-├── types.ts                # TypeScript 类型定义
-├── vite.config.ts          # Vite 配置
-└── package.json            # 项目依赖
+```bash
+npm run dev
 ```
 
----
+打开 `http://localhost:7878`。
 
-## 🐛 常见问题
+4. 构建预览
 
-### Q: 部署后显示空白页？
+```bash
+npm run build
+npm run preview
+```
 
-A: 检查浏览器控制台错误，通常是 base 路径配置问题。确保 `vite.config.ts` 中的 base 与你的仓库名称一致。
+## 部署到 GitHub Pages
 
-### Q: API 请求失败？
+### 1. 配置 GitHub Secret
 
-A: 
-1. 确保在 GitHub Secrets 中正确配置了 `DEEPSEEK_API_KEY`
-2. 检查 API Key 是否有效
-3. DeepSeek API 可能有地区限制
+进入仓库：Settings → Secrets and variables → Actions → New repository secret。
 
-### Q: 3D 背景不显示？
+添加：
 
-A: 
-1. 检查浏览器是否支持 WebGL
-2. 某些移动设备可能性能不足
+| Name | Value |
+| --- | --- |
+| `SOPHIA_API_KEY` | 你的 OpenAI-compatible API Key |
 
----
+当前 workflow 已默认使用：
 
-## 📜 许可证
+```env
+SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
+SOPHIA_API_MODEL=gpt-5.4-mini
+SOPHIA_API_PROVIDER=OpenAI-compatible
+```
 
-MIT License
+### 2. 启用 GitHub Pages
+
+Settings → Pages → Source 选择 GitHub Actions。
+
+### 3. 推送 main 分支
+
+GitHub Actions 会自动构建并部署到 Pages。
+
+## 重要安全提示
+
+这是纯前端应用，Vite 会把环境变量注入浏览器 bundle。因此：
+
+1. 不要使用高额度生产 API Key。
+2. 建议使用限额 key。
+3. 定期轮换 key。
+4. 如果要真正隐藏 key，需要增加 Cloudflare Workers、Vercel Functions 或其他服务端代理。
+
+## 项目结构
+
+```text
+components/
+  Arena.tsx              # 结果页节目化布局
+  HistoryPage.tsx        # 历史结果归档
+  ReasoningDisplay.tsx   # 实时生成进度
+  ThoughtVoiceCard.tsx   # 长篇思想声音卡片
+services/
+  sophiaService.ts       # Sophia OpenAI-compatible API 服务
+ data/
+  preloadedHistory.ts    # 预置参考样本
+App.tsx                  # 主应用与渐进生成流程
+types.ts                 # 结果模型与生成进度类型
+vite.config.ts           # Vite 环境变量注入
+```
+
+## 常见问题
+
+### 部署后显示缺少 API Key
+
+确认 GitHub Actions Secret 中存在 `SOPHIA_API_KEY`，并重新触发部署。
+
+### 生成很慢
+
+长篇思想声音是核心体验。当前采用先生成分析骨架，再并发生成长文卡片的方式；用户会先看到页面结构和生成进度，长文完成一篇显示一篇。
+
+### API Key 是否安全？
+
+前端直连不隐藏 key。正式公开运营前建议加服务端代理。
