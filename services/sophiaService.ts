@@ -10,6 +10,7 @@ import {
   RouteNode,
   TensionFocus,
   ThoughtVoice,
+  ThoughtVoiceImageAvatar,
   VoiceKind,
   emptyConclusion,
 } from '../types';
@@ -17,8 +18,16 @@ import {
 const apiKey = process.env.SOPHIA_API_KEY || '';
 const apiBaseUrl = (process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1').replace(/\/$/, '');
 const apiModel = process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini';
+const avatarImageModel = process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite';
 const apiProvider = process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible';
 const API_URL = `${apiBaseUrl}/chat/completions`;
+const IMAGE_API_URL = `${apiBaseUrl}/images/generations`;
+const requestHeaders = () => ({
+  'Content-Type': 'application/json',
+  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+});
+
+export const THOUGHT_VOICE_AVATAR_STYLE = 'Sophia editorial portrait style: square museum-catalog avatar, warm ivory and charcoal palette, muted ink-wash texture, subtle paper grain, soft directional light, restrained philosophical atmosphere, elegant, non-cartoon, non-photorealistic, no text, no logos, no UI elements.';
 
 const MODE_LABELS: Record<ProgramMode, string> = {
   progressive: '层层深入',
@@ -55,19 +64,97 @@ const apiErrorMessage = async (response: Response) => {
   return `${apiProvider} API 请求失败: ${response.status} - ${errorData.error?.message || '未知错误'}`;
 };
 
-const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
-  if (!apiKey) {
-    throw new Error('缺少 SOPHIA_API_KEY。请在 .env.local 或 GitHub Secrets 中设置 Sophia API Key。');
+const callAvatarImage = async (prompt: string): Promise<string> => {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await fetch(IMAGE_API_URL, {
+      method: 'POST',
+      headers: requestHeaders(),
+      body: JSON.stringify({
+        model: avatarImageModel,
+        prompt,
+        n: 1,
+        size: '1024x1024',
+        response_format: 'b64_json',
+      }),
+    });
+
+    if (response.ok || !isTransientStatus(response.status) || attempt === 2) break;
+    await wait(800 * (attempt + 1));
   }
 
+  if (!response?.ok) {
+    throw new Error(response ? await apiErrorMessage(response) : `${apiProvider} 图片接口请求失败: 未知错误`);
+  }
+
+  const data = await response.json().catch(() => ({} as any));
+  const item = data?.data?.[0];
+  if (item?.b64_json) {
+    return `data:image/png;base64,${item.b64_json}`;
+  }
+  if (typeof item?.url === 'string' && item.url) {
+    return item.url;
+  }
+  throw new Error(`${apiProvider} 图片接口未返回可用图像。`);
+};
+
+const VOICE_KIND_AVATAR_SUBJECT: Record<VoiceKind, string> = {
+  philosopher: 'a fictional, stylized philosopher figure inspired by the spirit of this thinker but NOT a likeness of any real or historical person; do not attempt photo-realistic celebrity resemblance.',
+  school: 'a fictional, representative thinker embodying the temperament of this school of thought; symbolic, archetypal, never a real person.',
+  concept: 'an allegorical personification of the concept, conveyed through gesture, light, posture and quiet symbolic background props; expressive but restrained.',
+  position: 'a fictional contemporary thinker holding this real-world stance; ordinary modern attire, museum-catalog framing, no celebrity likeness.',
+  contemporary: 'a fictional contemporary critic or observer; thoughtful expression, modern restrained attire, museum-catalog framing.',
+};
+
+const NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid celebrity photo likeness.';
+
+export const buildThoughtVoiceAvatarPrompt = (
+  topic: string,
+  outline: Pick<AnalysisOutline, 'philosophical_title' | 'modeLabel'>,
+  voicePlan: { name: string; kind: VoiceKind; school?: string; role: string; coreConcept: string; oneLine: string; stance: string },
+): string => {
+  const subject = VOICE_KIND_AVATAR_SUBJECT[voicePlan.kind] || VOICE_KIND_AVATAR_SUBJECT.philosopher;
+  const schoolLine = voicePlan.school ? `\nSchool / tradition: ${voicePlan.school}` : '';
+  return [
+    THOUGHT_VOICE_AVATAR_STYLE,
+    `Subject: ${subject}`,
+    `Voice name (semantic anchor only, do NOT render as text): ${voicePlan.name}`,
+    `Voice kind: ${voicePlan.kind}${schoolLine}`,
+    `Role in this analysis: ${voicePlan.role}`,
+    `Core concept: ${voicePlan.coreConcept}`,
+    `One-line stance: ${voicePlan.oneLine || voicePlan.stance}`,
+    `User question being analyzed: ${topic}`,
+    `Big question: ${outline.philosophical_title}`,
+    `Analytical mode: ${outline.modeLabel}`,
+    'Composition: square 1:1 framing, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere.',
+    NEGATIVE_AVATAR_PROMPT,
+  ].join('\n');
+};
+
+export const generateThoughtVoiceAvatar = async (
+  topic: string,
+  outline: Pick<AnalysisOutline, 'philosophical_title' | 'modeLabel'>,
+  voicePlan: { name: string; kind: VoiceKind; school?: string; role: string; coreConcept: string; oneLine: string; stance: string },
+): Promise<ThoughtVoiceImageAvatar> => {
+  const prompt = buildThoughtVoiceAvatarPrompt(topic, outline, voicePlan);
+  const imageUrl = await callAvatarImage(prompt);
+  return {
+    imageUrl,
+    prompt,
+    style: THOUGHT_VOICE_AVATAR_STYLE,
+    model: avatarImageModel,
+    alt: `${voicePlan.name} 的方形思想声音头像`,
+    generatedAt: new Date().toISOString(),
+    subjectType: voicePlan.kind,
+  };
+};
+
+const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
   let response: Response | null = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     response = await fetch(API_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: requestHeaders(),
       body: JSON.stringify({
         model: apiModel,
         messages,
@@ -96,19 +183,12 @@ const callChatText = async (
   maxTokens = 4096,
   onDelta?: (delta: string, fullText: string) => void,
 ): Promise<string> => {
-  if (!apiKey) {
-    throw new Error('缺少 SOPHIA_API_KEY。请在 .env.local 或 GitHub Secrets 中设置 Sophia API Key。');
-  }
-
   if (!onDelta) {
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       response = await fetch(API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers: requestHeaders(),
         body: JSON.stringify({
           model: apiModel,
           messages,
@@ -131,10 +211,7 @@ const callChatText = async (
 
   const response = await fetch(API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: requestHeaders(),
     body: JSON.stringify({
       model: apiModel,
       messages,
@@ -376,6 +453,12 @@ const normalizeFollowUps = (value: unknown): AnalysisResult['followUps'] =>
     }).filter((item) => item.question)
     : [];
 
+const normalizeQuestionSuggestions = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : [])
+    .map((item) => toText(item).replace(/^[-•\d.、\s]+/, '').trim())
+    .filter((item) => item.length >= 4)
+    .slice(0, 5);
+
 const normalizeConclusion = (value: unknown): OpenConclusion => {
   if (!isRecord(value)) return emptyConclusion;
   return {
@@ -559,6 +642,11 @@ const generateVoiceEssay = async (
     },
   ], 1000).catch(() => ({ summaryForSynthesis: voicePlan.stance || voicePlan.oneLine || '', quote: '', challenges: [] }));
 
+  const avatar = await generateThoughtVoiceAvatar(topic, outline, voicePlan).catch((error) => {
+    console.warn(`[sophia] 思想声音头像生成失败：${voicePlan.name}`, error);
+    return undefined;
+  });
+
   return {
     id: voicePlan.id,
     name: voicePlan.name,
@@ -576,6 +664,7 @@ const generateVoiceEssay = async (
     quote: summary.quote,
     challenges: Array.isArray(summary.challenges) ? summary.challenges : [],
     summaryForSynthesis: summary.summaryForSynthesis || voicePlan.stance,
+    avatar,
     status: 'completed',
   };
 };
@@ -809,9 +898,32 @@ export const analyzeTopic = async (
   }
 };
 
-export const getReflectionFeedback = async (topic: string, userReflection: string): Promise<string> => {
-  if (!apiKey) return 'API Key 缺失。';
+export const generateQuestionSuggestions = async (seedTopic = ''): Promise<string[]> => {
+  const raw = await callChatJson<{ questions: string[] }>([
+    {
+      role: 'system',
+      content: '你是 Sophia 的首页问题策展人。请生成适合被哲学分析器展开的中文问题。只输出 JSON。',
+    },
+    {
+      role: 'user',
+      content: `请生成 5 个适合首页展示的哲学问题。
+${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入具体兴趣，请覆盖生活焦虑、伦理困境、认识论、社会议题和存在问题。'}
 
+要求：
+- 每个问题 8-22 个中文字符左右，必须以问号结尾。
+- 问题要具体、有张力、普通人也愿意点击。
+- 不要重复“我们应该生孩子吗？”这类已有问题。
+- 不要输出解释。
+
+输出 JSON：{"questions":["问题1？","问题2？","问题3？","问题4？","问题5？"]}`,
+    },
+  ], 900);
+
+  const questions = normalizeQuestionSuggestions(raw.questions);
+  return questions.length > 0 ? questions : [];
+};
+
+export const getReflectionFeedback = async (topic: string, userReflection: string): Promise<string> => {
   try {
     return await callChatText([
       {

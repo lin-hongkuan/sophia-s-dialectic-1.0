@@ -72,6 +72,16 @@ export interface ThoughtExperimentFrame {
   }>;
 }
 
+export interface ThoughtVoiceImageAvatar {
+  imageUrl: string;
+  prompt: string;
+  style: string;
+  model: string;
+  alt: string;
+  generatedAt?: string;
+  subjectType?: VoiceKind;
+}
+
 export interface ThoughtVoice {
   id: string;
   name: string;
@@ -89,6 +99,7 @@ export interface ThoughtVoice {
   quote?: string;
   challenges?: string[];
   summaryForSynthesis: string;
+  avatar?: ThoughtVoiceImageAvatar;
   status?: VoiceStatus;
   error?: string;
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { analyzeTopic, createPartialResult } from './services/sophiaService';
+import { analyzeTopic, createPartialResult, generateQuestionSuggestions } from './services/sophiaService';
 import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, HistoryEntry, ThoughtVoice } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
@@ -8,7 +8,7 @@ import HistoryPage from './components/HistoryPage';
 import ManifestoPage from './components/ManifestoPage';
 import ActiveRunBanner from './components/ActiveRunBanner';
 import { PRELOADED_HISTORY_ENTRY } from './data/preloadedHistory';
-import { Info, ArrowRight } from 'lucide-react';
+import { Info, ArrowRight, Sparkles } from 'lucide-react';
 
 type View = 'home' | 'history' | 'manifesto' | 'result';
 type SelectedSource = 'active' | 'history' | null;
@@ -17,6 +17,8 @@ const HISTORY_KEY = 'sophia.history.v1';
 const HISTORY_LIMIT = 10;
 const PRESET_HISTORY_KEY = 'sophia.preset.generated.v1';
 const PRESET_TOPIC = '我们应该生孩子吗？';
+const DEFAULT_QUESTION_SUGGESTIONS = ['如何克服虚无主义？', '女权主义有道理吗？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
+const API_CONFIGURED = process.env.SOPHIA_API_CONFIGURED === 'true';
 
 const makeRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -97,6 +99,9 @@ const App: React.FC = () => {
   const [activeRun, setActiveRun] = useState<ActiveAnalysisRun | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [presetEntry, setPresetEntry] = useState<HistoryEntry>(PRELOADED_HISTORY_ENTRY);
+  const [questionSuggestions, setQuestionSuggestions] = useState<string[]>(DEFAULT_QUESTION_SUGGESTIONS);
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+  const [suggestionError, setSuggestionError] = useState('');
   const activeRunIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -114,7 +119,7 @@ const App: React.FC = () => {
   const showManifesto = view === 'manifesto';
   const showResult = view === 'result';
   const isViewingActiveRun = showResult && selectedSource === 'active';
-  const showActiveBanner = !!activeRun && !isViewingActiveRun;
+  const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
 
   const persistResult = (nextResult: AnalysisResult) => {
     const entry: HistoryEntry = {
@@ -303,6 +308,26 @@ const App: React.FC = () => {
     startAnalysis(explicitTopic || topic, continuationContext);
   };
 
+  const handleGenerateQuestionSuggestions = async () => {
+    if (activeRunIsRunning || isGeneratingSuggestions) return;
+
+    setIsGeneratingSuggestions(true);
+    setSuggestionError('');
+    try {
+      const generatedQuestions = await generateQuestionSuggestions(topic);
+      if (generatedQuestions.length > 0) {
+        setQuestionSuggestions(generatedQuestions);
+      } else {
+        setSuggestionError('这次没有生成出新问题，请稍后再试。');
+      }
+    } catch (error) {
+      console.error('[Sophia] question suggestion generation failed:', error);
+      setSuggestionError(error instanceof Error ? error.message : 'AI 暂时没有生成出问题。');
+    } finally {
+      setIsGeneratingSuggestions(false);
+    }
+  };
+
   const handleOpenHistory = (entry: HistoryEntry) => {
     setSelectedHistoryResult(entry.result);
     setTopic(entry.topic);
@@ -335,16 +360,28 @@ const App: React.FC = () => {
 
       <nav className="fixed w-full top-0 z-50 bg-museum-50/60 backdrop-blur-sm border-b border-museum-200/50 transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 md:h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={goHome}>
-            <div className="relative w-9 h-9 md:w-10 md:h-10 border border-museum-800/80 bg-white/55 backdrop-blur-[3px] flex items-center justify-center shadow-sm">
-              <div className="absolute inset-1 border border-museum-300/70" />
-              <span className="relative font-serif text-lg md:text-xl italic text-museum-900 leading-none">S</span>
+          <button
+            type="button"
+            onClick={goHome}
+            aria-label="返回 Sophia's Dialectic 首页"
+            className="group -ml-2 flex items-center gap-3 rounded-full px-2 py-1 text-left transition-all duration-300 hover:bg-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-museum-400/50"
+          >
+            <div className="relative h-10 w-10 shrink-0 md:h-11 md:w-11">
+              <div className="absolute inset-0 rounded-[1.05rem] border border-museum-300/80 bg-gradient-to-br from-white/95 via-museum-50/80 to-museum-200/65 shadow-[0_10px_28px_rgba(44,42,38,0.10)] backdrop-blur-md transition-all duration-300 group-hover:-rotate-3 group-hover:shadow-[0_14px_34px_rgba(44,42,38,0.14)]" />
+              <div className="absolute inset-1 rounded-[0.82rem] border border-white/70 bg-museum-50/45" />
+              <svg className="absolute inset-0 h-full w-full p-2.5 text-museum-900" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+                <path d="M12 26C12 18 28 22 28 14C28 10.8 24.9 8.8 20.7 8.8C17.8 8.8 15.1 9.8 13.1 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M28 14C28 22 12 18 12 26C12 29.3 15.3 31.2 19.6 31.2C22.8 31.2 25.7 30.1 27.8 28.2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                <circle cx="13" cy="12" r="1.7" fill="currentColor" />
+                <circle cx="27" cy="28" r="1.7" fill="currentColor" />
+              </svg>
+              <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-white/80 bg-[#C5A059] shadow-[0_0_0_3px_rgba(197,160,89,0.18)] transition-transform duration-300 group-hover:scale-110" />
             </div>
             <div className="leading-none">
-              <p className="font-serif text-base md:text-lg tracking-[0.08em] text-museum-900">Sophia</p>
-              <p className="hidden sm:block text-[9px] md:text-[10px] font-mono uppercase tracking-[0.28em] text-museum-500 mt-1">Dialectic Archive</p>
+              <p className="font-serif text-base tracking-[0.04em] text-museum-900 md:text-lg">Sophia's</p>
+              <p className="mt-1 hidden text-[9px] font-mono uppercase tracking-[0.24em] text-museum-500 sm:block md:text-[10px]">Dialectic Engine</p>
             </div>
-          </div>
+          </button>
           <div className="flex items-center space-x-6">
             <button onClick={() => setView('history')} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">History</button>
             <button onClick={() => setView('manifesto')} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">Manifesto</button>
@@ -352,17 +389,19 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {showActiveBanner && activeRun && <ActiveRunBanner activeRun={activeRun} onOpen={openActiveRun} />}
-
       <main className="flex-grow pt-20 md:pt-24 px-4 relative z-10 flex flex-col">
         <AppErrorBoundary resetKey={`${view}-${selectedSource || 'none'}-${displayedResult?.id || 'empty'}`}>
         {showHome && (
-          <div className="flex-grow flex flex-col items-center justify-center -mt-10 md:-mt-20 transition-all duration-700 animate-fade-in px-2 md:px-0">
+          <div className="flex-grow flex flex-col items-center justify-center -mt-2 pt-6 pb-10 transition-all duration-700 animate-fade-in px-2 md:-mt-8 md:pt-8 md:pb-14 md:px-0">
             <div className="max-w-4xl w-full text-center relative mb-8 md:mb-16">
               <div className="absolute left-1/2 -top-12 h-12 w-px bg-museum-300 -translate-x-1/2 hidden md:block" />
 
-              <div className="inline-block mb-4 md:mb-8 px-3 py-1 border border-museum-300 rounded-full bg-white/40 backdrop-blur-sm scale-90 md:scale-100">
-                <span className="text-[10px] md:text-xs font-mono uppercase tracking-[0.2em] text-museum-600">The Philosophical Engine</span>
+              <div
+                className="notranslate pointer-events-none relative z-20 mb-4 inline-flex h-8 max-w-[calc(100vw-2rem)] select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8"
+                translate="no"
+                aria-label="The Philosophical Engine"
+              >
+                <span className="block whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">The Philosophical Engine</span>
               </div>
 
               <h1 className="font-serif text-5xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
@@ -409,20 +448,40 @@ const App: React.FC = () => {
             )}
 
             <div className="mt-8 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-2">
-              <span className="w-full text-center text-[10px] md:text-xs font-mono text-museum-400 uppercase tracking-widest mb-1 md:mb-2">Philosophy as a Program</span>
-              {['如何克服虚无主义？', '女权主义有道理吗？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'].map((suggestion) => (
+              <div className="mb-1 flex w-full flex-col items-center justify-center gap-3 md:mb-2 md:flex-row">
+                <span className="text-center text-[10px] font-mono uppercase tracking-widest text-museum-400 md:text-xs">Philosophy as a Program</span>
+                <button
+                  type="button"
+                  onClick={handleGenerateQuestionSuggestions}
+                  disabled={activeRunIsRunning || isGeneratingSuggestions || !API_CONFIGURED}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-museum-300/70 bg-white/65 px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.16em] text-museum-600 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-museum-500 hover:bg-white hover:text-museum-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                >
+                  <Sparkles className={`h-3 w-3 ${isGeneratingSuggestions ? 'animate-spin' : ''}`} />
+                  {isGeneratingSuggestions ? 'AI Thinking' : 'AI 生成问题'}
+                </button>
+              </div>
+              {questionSuggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setTopic(suggestion)}
-                  disabled={activeRunIsRunning}
+                  disabled={activeRunIsRunning || isGeneratingSuggestions}
                   className="px-3 py-1.5 md:px-5 md:py-2.5 bg-white/60 border border-museum-200 rounded-lg text-xs md:text-sm text-museum-700 hover:border-museum-400 hover:shadow-md hover:bg-white hover:-translate-y-0.5 transition-all duration-300 font-medium backdrop-blur-sm disabled:opacity-50 disabled:hover:translate-y-0"
                 >
                   {suggestion}
                 </button>
               ))}
+              {suggestionError && (
+                <p className="w-full text-center text-[11px] text-red-700/80">{suggestionError}</p>
+              )}
             </div>
 
-            {!process.env.SOPHIA_API_KEY && (
+            {showActiveBanner && activeRun && (
+              <div className="mt-10 md:mt-16 w-full">
+                <ActiveRunBanner activeRun={activeRun} onOpen={openActiveRun} />
+              </div>
+            )}
+
+            {!API_CONFIGURED && (
               <div className="mt-8 md:mt-12 p-3 px-6 bg-red-50 text-red-800 rounded-full border border-red-100 inline-flex items-center gap-2 text-xs font-medium shadow-sm">
                 <Info className="w-3 h-3" />
                 <span>System Alert: Missing SOPHIA_API_KEY configuration.</span>
@@ -439,7 +498,7 @@ const App: React.FC = () => {
             onOpenActive={openActiveRun}
             onBack={goHome}
             onRegeneratePreset={handleRegeneratePreset}
-            canRegeneratePreset={!!process.env.SOPHIA_API_KEY && !activeRunIsRunning}
+            canRegeneratePreset={!!API_CONFIGURED && !activeRunIsRunning}
           />
         )}
 

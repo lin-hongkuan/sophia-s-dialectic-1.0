@@ -51,7 +51,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
   const hasSynthesis = data.tensions.length > 0 || data.conclusion.summary;
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 pb-20 animate-fade-in">
+    <div className="w-full max-w-[100rem] mx-auto px-3 sm:px-4 pb-20 animate-fade-in">
       <div className="text-center py-12 md:py-20 space-y-5">
         <div className="inline-flex items-center gap-2 border border-museum-300 px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm">
           {modeIcon[data.mode] || <Compass className="w-4 h-4" />}
@@ -286,7 +286,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
           <span className="text-sm font-serif italic text-museum-400">—— 思想声音 ——</span>
           <h2 className="font-serif text-3xl md:text-4xl text-museum-900 mt-3">几种立场的长篇展开</h2>
         </div>
-        <div className="max-w-[92rem] mx-auto space-y-12 md:space-y-16">
+        <div className="w-full max-w-[98rem] mx-auto space-y-12 md:space-y-16">
           {data.voices.map((voice, idx) => (
             <ThoughtVoiceCard key={voice.id} data={voice} index={idx} />
           ))}

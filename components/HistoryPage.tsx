@@ -37,13 +37,25 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 pb-20 animate-fade-in">
-      <div className="text-center py-12 md:py-20">
-        <div className="inline-flex items-center gap-2 border border-museum-300 px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm mb-6">
-          <Archive className="w-4 h-4" />
-          <span className="text-xs font-mono uppercase tracking-widest text-museum-800">Archive of Questions</span>
+      <div className="relative mx-auto max-w-4xl py-14 text-center md:py-20">
+        <div className="absolute left-1/2 top-0 hidden h-28 w-px -translate-x-1/2 bg-museum-300/80 md:block" />
+        <div
+          className="notranslate relative z-10 mb-5 mt-14 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8"
+          translate="no"
+        >
+          <Archive className="mr-2 h-3.5 w-3.5 text-museum-600" />
+          <span className="whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">Archive of Questions</span>
         </div>
-        <h1 className="font-serif text-5xl md:text-7xl text-museum-900 leading-tight">History</h1>
-        <p className="max-w-2xl mx-auto mt-6 text-museum-700 leading-relaxed">
+        <h1 className="font-serif text-5xl leading-[0.9] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
+          Sophia's<br />
+          <span className="relative inline-block italic">
+            History
+            <svg className="absolute -bottom-1 -left-[5%] h-2 w-[110%] text-museum-300/50 md:-bottom-2 md:h-4" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 5 Q 50 12 100 5" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+          </span>
+        </h1>
+        <p className="mx-auto mt-6 max-w-2xl px-2 text-sm leading-relaxed text-museum-700 md:mt-8 md:text-base">
           这里保存你每次提问生成的完整结果页。正在生成的问题也会临时出现在这里，方便你离开后再回来。
         </p>
       </div>

@@ -37,9 +37,10 @@ jobs:
         env:
           GITHUB_ACTIONS: true
           SOPHIA_API_KEY: ${{ secrets.SOPHIA_API_KEY }}
-          SOPHIA_API_BASE_URL: https://api.linhongkuan.com/v1
-          SOPHIA_API_MODEL: gpt-5.4-mini
-          SOPHIA_API_PROVIDER: OpenAI-compatible
+          SOPHIA_API_BASE_URL: ${{ vars.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1' }}
+          SOPHIA_API_MODEL: ${{ vars.SOPHIA_API_MODEL || 'gpt-5.4-mini' }}
+          SOPHIA_IMAGE_MODEL: ${{ vars.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite' }}
+          SOPHIA_API_PROVIDER: ${{ vars.SOPHIA_API_PROVIDER || 'OpenAI-compatible' }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
