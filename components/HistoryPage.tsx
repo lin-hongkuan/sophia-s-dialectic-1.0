@@ -5,6 +5,7 @@ import { Archive, ArrowRight, BookOpen, Clock, Loader2, RotateCcw, Sparkles, Ale
 interface HistoryPageProps {
   entries: HistoryEntry[];
   activeRun?: ActiveAnalysisRun | null;
+  entryHref?: (entry: HistoryEntry) => string;
   onOpen: (entry: HistoryEntry) => void;
   onOpenActive?: () => void;
   onBack: () => void;
@@ -25,6 +26,7 @@ const stageLabel: Record<string, string> = {
 const HistoryPage: React.FC<HistoryPageProps> = ({
   entries,
   activeRun,
+  entryHref,
   onOpen,
   onOpenActive,
   onBack,
@@ -106,7 +108,14 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {entries.map((entry) => (
             <div key={entry.id} className="bg-white/85 backdrop-blur-sm border border-museum-200 rounded-xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group overflow-hidden">
-              <button onClick={() => onOpen(entry)} className="w-full text-left p-6 md:p-8">
+              <a
+                href={entryHref?.(entry) || '/history'}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpen(entry);
+                }}
+                className="block w-full text-left p-6 md:p-8"
+              >
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div className="flex flex-wrap gap-2">
                     <span className="text-[10px] uppercase tracking-widest text-museum-800 bg-museum-100 px-3 py-1 rounded-sm font-semibold border border-museum-200">
@@ -128,7 +137,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
                   <Clock className="w-3 h-3" />
                   {new Date(entry.createdAt).toLocaleString('zh-CN')}
                 </div>
-              </button>
+              </a>
               {entry.isPreset && onRegeneratePreset && (
                 <div className="border-t border-museum-100 px-6 md:px-8 py-4 bg-white/55">
                   <button

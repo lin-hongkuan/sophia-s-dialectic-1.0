@@ -32,7 +32,7 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    base: './',
+    base: '/',
     server: {
       port: 7878,
       strictPort: true,

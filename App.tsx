@@ -12,6 +12,7 @@ import { Info, ArrowRight, Sparkles } from 'lucide-react';
 
 type View = 'home' | 'history' | 'manifesto' | 'result';
 type SelectedSource = 'active' | 'history' | null;
+type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | `/history/${string}`;
 
 const HISTORY_KEY = 'sophia.history.v1';
 const HISTORY_LIMIT = 10;
@@ -19,8 +20,36 @@ const PRESET_HISTORY_KEY = 'sophia.preset.generated.feminism.v1';
 const PRESET_TOPIC = '女性主义有道理吗？';
 const DEFAULT_QUESTION_SUGGESTIONS = ['女性主义有道理吗？', '如何克服虚无主义？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
 const API_CONFIGURED = process.env.SOPHIA_API_CONFIGURED === 'true';
+const ROUTES: Record<string, AppRoute> = {
+  '/': '/',
+  '/history': '/history',
+  '/history/': '/history',
+  '/history/sample': '/history/sample',
+  '/history/sample/': '/history/sample',
+  '/manifesto': '/manifesto',
+  '/manifesto/': '/manifesto',
+};
 
 const makeRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeRoute = (pathname: string): AppRoute => {
+  if (ROUTES[pathname]) return ROUTES[pathname];
+  if (/^\/history\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
+  return '/';
+};
+
+const pushRoute = (route: AppRoute) => {
+  if (window.location.pathname !== route) {
+    window.history.pushState(null, '', route);
+  }
+};
+
+const historyItemRoute = (entry: HistoryEntry): AppRoute => {
+  if (entry.isPreset || entry.generatedByChain) return '/history/sample';
+  return `/history/${encodeURIComponent(entry.id)}`;
+};
+
+const routeHistoryId = (route: AppRoute) => route.startsWith('/history/') ? decodeURIComponent(route.slice('/history/'.length)) : '';
 
 const loadHistory = (): HistoryEntry[] => {
   try {
@@ -104,9 +133,71 @@ const App: React.FC = () => {
   const [suggestionError, setSuggestionError] = useState('');
   const activeRunIdRef = useRef<string | null>(null);
 
+  const openRoute = (route: AppRoute, replace = false) => {
+    const nextPresetEntry = loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY;
+
+    if (replace) {
+      window.history.replaceState(null, '', route);
+    } else {
+      pushRoute(route);
+    }
+
+    if (route === '/history/sample') {
+      setPresetEntry(nextPresetEntry);
+      setSelectedHistoryResult(nextPresetEntry.result);
+      setTopic(nextPresetEntry.topic);
+      setSelectedSource('history');
+      setView('result');
+      return;
+    }
+
+    const historyId = routeHistoryId(route);
+    if (historyId && historyId !== 'sample') {
+      const storedHistory = loadHistory();
+      const historyEntry = storedHistory.find((entry) => entry.id === historyId);
+      if (historyEntry) {
+        setHistoryEntries(storedHistory);
+        setSelectedHistoryResult(historyEntry.result);
+        setTopic(historyEntry.topic);
+        setSelectedSource('history');
+        setView('result');
+        return;
+      }
+      window.history.replaceState(null, '', '/history');
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setView('history');
+      return;
+    }
+
+    if (route === '/history') {
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setView('history');
+      return;
+    }
+
+    if (route === '/manifesto') {
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setView('manifesto');
+      return;
+    }
+
+    setSelectedSource(null);
+    setSelectedHistoryResult(null);
+    setView('home');
+  };
+
   useEffect(() => {
     setHistoryEntries(loadHistory());
-    setPresetEntry(loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY);
+    const nextPresetEntry = loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY;
+    setPresetEntry(nextPresetEntry);
+    openRoute(normalizeRoute(window.location.pathname), true);
+
+    const handlePopState = () => openRoute(normalizeRoute(window.location.pathname), true);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const activeRunIsRunning = activeRun?.status === 'starting' || activeRun?.status === 'running';
@@ -162,11 +253,9 @@ const App: React.FC = () => {
     setView('result');
   };
 
-  const goHome = () => {
-    setSelectedSource(null);
-    setSelectedHistoryResult(null);
-    setView('home');
-  };
+  const goHome = () => openRoute('/');
+  const goHistory = () => openRoute('/history');
+  const goManifesto = () => openRoute('/manifesto');
 
   const updateActiveRun = (runId: string, updater: (run: ActiveAnalysisRun) => ActiveAnalysisRun) => {
     if (activeRunIdRef.current !== runId) return;
@@ -329,6 +418,13 @@ const App: React.FC = () => {
   };
 
   const handleOpenHistory = (entry: HistoryEntry) => {
+    const route = historyItemRoute(entry);
+    if (route === '/history/sample') {
+      openRoute('/history/sample');
+      return;
+    }
+
+    pushRoute(route);
     setSelectedHistoryResult(entry.result);
     setTopic(entry.topic);
     setSelectedSource('history');
@@ -383,8 +479,8 @@ const App: React.FC = () => {
             </div>
           </button>
           <div className="flex items-center space-x-6">
-            <button onClick={() => setView('history')} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">History</button>
-            <button onClick={() => setView('manifesto')} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">Manifesto</button>
+            <button onClick={goHistory} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">History</button>
+            <button onClick={goManifesto} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">Manifesto</button>
           </div>
         </div>
       </nav>
@@ -494,6 +590,7 @@ const App: React.FC = () => {
           <HistoryPage
             entries={allHistoryEntries}
             activeRun={activeRun}
+            entryHref={(entry) => historyItemRoute(entry)}
             onOpen={handleOpenHistory}
             onOpenActive={openActiveRun}
             onBack={goHome}
