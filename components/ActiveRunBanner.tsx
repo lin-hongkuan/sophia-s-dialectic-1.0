@@ -9,13 +9,15 @@ interface ActiveRunBannerProps {
 
 const stageLabel: Record<string, string> = {
   idle: '等待',
-  outline: '整理问题',
-  route: '路线图',
-  voices: '思想声音',
+  outline: '整理问题结构',
+  route: '生成论证路线',
+  voices: '生成思想声音',
   synthesis: '综合判断',
   done: '完成',
   error: '出错',
 };
+
+const stageOrder = ['outline', 'route', 'voices', 'synthesis', 'done'];
 
 const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) => {
   const isRunning = activeRun.status === 'starting' || activeRun.status === 'running';
@@ -23,9 +25,15 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
   const isError = activeRun.status === 'error';
   const title = activeRun.result?.philosophical_title || activeRun.topic;
   const progress = activeRun.progress;
+  const stage = progress?.stage || 'outline';
+  const stageIndex = stageOrder.indexOf(stage);
+  const stageText = stageIndex >= 0 ? `第 ${Math.min(stageIndex + 1, 4)}/4 步 · ${stageLabel[stage]}` : stageLabel[stage];
   const progressText = progress?.totalVoices
-    ? `${progress.completedVoices}/${progress.totalVoices} 个思想声音`
-    : stageLabel[progress?.stage || 'outline'];
+    ? `${stageText} · ${progress.completedVoices}/${progress.totalVoices} 个思想声音`
+    : stageText;
+  const currentWork = progress?.currentVoiceName
+    ? `正在展开：${progress.currentVoiceName}${typeof progress.streamedChars === 'number' ? ` · ${progress.streamedChars} 字` : ''}`
+    : progress?.messages?.slice(-1)[0];
   const statusText = isRunning ? '档案正在整理' : isCompleted ? '新档案已归卷' : '档案整理受阻';
   const actionText = isRunning ? '回到生成' : isCompleted ? '查看结果' : '查看错误';
 
@@ -48,8 +56,8 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
                 {statusText} · {progressText}
               </p>
               <p className="truncate font-serif text-sm leading-snug text-museum-900 sm:text-base">{title}</p>
-              {progress?.currentVoiceName && isRunning && (
-                <p className="mt-0.5 truncate text-xs text-museum-500">正在展开：{progress.currentVoiceName}</p>
+              {currentWork && isRunning && (
+                <p className="mt-0.5 truncate text-xs text-museum-500">{currentWork}</p>
               )}
             </div>
           </div>

@@ -15,12 +15,24 @@ interface HistoryPageProps {
 
 const stageLabel: Record<string, string> = {
   idle: '等待',
-  outline: '整理问题',
-  route: '路线图',
-  voices: '思想声音',
+  outline: '整理问题结构',
+  route: '生成论证路线',
+  voices: '生成思想声音',
   synthesis: '综合判断',
   done: '完成',
   error: '出错',
+};
+
+const stageOrder = ['outline', 'route', 'voices', 'synthesis', 'done'];
+
+const formatActiveRunProgress = (activeProgress?: ActiveAnalysisRun['progress']) => {
+  const stage = activeProgress?.stage || 'outline';
+  const stageIndex = stageOrder.indexOf(stage);
+  const stageText = stageIndex >= 0 ? `第 ${Math.min(stageIndex + 1, 4)}/4 步 · ${stageLabel[stage]}` : stageLabel[stage];
+  if (!activeProgress?.totalVoices) return stageText;
+  const voiceText = `${activeProgress.completedVoices}/${activeProgress.totalVoices} 个思想声音`;
+  const currentVoiceText = activeProgress.currentVoiceName ? ` · 正在展开：${activeProgress.currentVoiceName}` : '';
+  return `${stageText} · ${voiceText}${currentVoiceText}`;
 };
 
 const HistoryPage: React.FC<HistoryPageProps> = ({
@@ -38,11 +50,11 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
   const activeProgress = activeRun?.progress;
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 pb-20 animate-fade-in">
-      <div className="relative mx-auto max-w-4xl py-14 text-center md:py-20">
+    <div className="w-full max-w-6xl mx-auto px-4 pb-20 animate-fade-in -mt-8 md:-mt-12">
+      <div className="relative mx-auto max-w-4xl py-10 text-center md:py-14">
         <div className="absolute left-1/2 top-0 hidden h-28 w-px -translate-x-1/2 bg-museum-300/80 md:block" />
         <div
-          className="notranslate relative z-10 mb-5 mt-14 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8"
+          className="notranslate relative z-10 mb-5 mt-10 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8 md:mt-12"
           translate="no"
         >
           <Archive className="mr-2 h-3.5 w-3.5 text-museum-600" />
@@ -81,10 +93,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
                 </p>
                 <h2 className="font-serif text-2xl md:text-3xl leading-tight mb-3">{activeRunTitle}</h2>
                 <p className="text-museum-200 text-sm leading-relaxed">
-                  {activeProgress?.totalVoices
-                    ? `${stageLabel[activeProgress.stage]} · ${activeProgress.completedVoices}/${activeProgress.totalVoices} 个思想声音`
-                    : stageLabel[activeProgress?.stage || 'outline']}
-                  {activeProgress?.currentVoiceName ? ` · ${activeProgress.currentVoiceName}` : ''}
+                  {formatActiveRunProgress(activeProgress)}
                 </p>
               </div>
             </div>

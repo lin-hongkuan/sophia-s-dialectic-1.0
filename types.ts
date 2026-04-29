@@ -199,6 +199,7 @@ export interface AnalyzeCallbacks {
   onRouteMap?: (routeMap: RouteNode[]) => void;
   onVoiceStart?: (voiceId: string, voiceName: string) => void;
   onVoiceDelta?: (voiceId: string, delta: string, fullText: string) => void;
+  onVoiceStep?: (voiceId: string, voiceName: string, message: string) => void;
   onVoiceComplete?: (voice: ThoughtVoice) => void;
   onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
   onError?: (message: string) => void;

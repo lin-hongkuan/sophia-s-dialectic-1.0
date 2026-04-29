@@ -31,6 +31,8 @@ const requestHeaders = () => ({
 
 export const THOUGHT_VOICE_AVATAR_STYLE = 'Sophia editorial portrait style: square museum-catalog avatar, warm ivory and charcoal palette, muted ink-wash texture, subtle paper grain, soft directional light, restrained philosophical atmosphere, elegant, non-cartoon, non-photorealistic, no text, no logos, no UI elements.';
 
+const HISTORICAL_PHILOSOPHER_AVATAR_STYLE = 'Sophia editorial portrait style: museum-catalog avatar, warm ivory and charcoal palette, muted ink-wash texture, subtle paper grain, soft directional light, restrained philosophical atmosphere, elegant, non-cartoon, editorial historical portrait realism, no text, no logos, no UI elements.';
+
 const MODE_LABELS: Record<ProgramMode, string> = {
   progressive: '层层深入',
   roundtable: '圆桌辩论',
@@ -101,7 +103,7 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
 };
 
 const VOICE_KIND_AVATAR_SUBJECT: Record<VoiceKind, string> = {
-  philosopher: 'a fictional, stylized philosopher figure inspired by the spirit of this thinker but NOT a likeness of any real or historical person; do not attempt photo-realistic celebrity resemblance.',
+  philosopher: 'a recognizable historical portrait interpretation when the voice name is a real philosopher; preserve the thinker\'s known facial structure, hair, clothing era, posture and intellectual temperament while keeping Sophia\'s restrained museum-catalog style.',
   school: 'a fictional, representative thinker embodying the temperament of this school of thought; symbolic, archetypal, never a real person.',
   concept: 'an allegorical personification of the concept, conveyed through gesture, light, posture and quiet symbolic background props; expressive but restrained.',
   position: 'a fictional contemporary thinker holding this real-world stance; ordinary modern attire, museum-catalog framing, no celebrity likeness.',
@@ -110,17 +112,24 @@ const VOICE_KIND_AVATAR_SUBJECT: Record<VoiceKind, string> = {
 
 const NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid celebrity photo likeness.';
 
+const HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid modern celebrity glamour photography.';
+
 export const buildThoughtVoiceAvatarPrompt = (
   topic: string,
   outline: Pick<AnalysisOutline, 'philosophical_title' | 'modeLabel'>,
   voicePlan: { name: string; kind: VoiceKind; school?: string; role: string; coreConcept: string; oneLine: string; stance: string },
 ): string => {
+  const isHistoricalPhilosopher = voicePlan.kind === 'philosopher';
   const subject = VOICE_KIND_AVATAR_SUBJECT[voicePlan.kind] || VOICE_KIND_AVATAR_SUBJECT.philosopher;
   const schoolLine = voicePlan.school ? `\nSchool / tradition: ${voicePlan.school}` : '';
+  const historicalLikenessLine = isHistoricalPhilosopher
+    ? 'Historical likeness cues: use the voice name to infer recognizable portrait references and era-specific details. For example, Sartre may have round glasses, a slightly asymmetrical gaze and Left Bank intellectual austerity; Spinoza may suggest a 17th-century Dutch-Sephardic scholar portrait with dark period clothing and lens-grinder study ambience; Camus may suggest a mid-century French-Algerian writer in black-and-white editorial mood, trench-coat restraint and direct lucid gaze.'
+    : '';
   return [
-    THOUGHT_VOICE_AVATAR_STYLE,
+    isHistoricalPhilosopher ? HISTORICAL_PHILOSOPHER_AVATAR_STYLE : THOUGHT_VOICE_AVATAR_STYLE,
     `Subject: ${subject}`,
     `Voice name (semantic anchor only, do NOT render as text): ${voicePlan.name}`,
+    historicalLikenessLine,
     `Voice kind: ${voicePlan.kind}${schoolLine}`,
     `Role in this analysis: ${voicePlan.role}`,
     `Core concept: ${voicePlan.coreConcept}`,
@@ -129,7 +138,7 @@ export const buildThoughtVoiceAvatarPrompt = (
     `Big question: ${outline.philosophical_title}`,
     `Analytical mode: ${outline.modeLabel}`,
     `Composition: ${avatarAspectHint}, slightly taller-than-wide editorial portrait, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere. Avoid square crop; leave quiet vertical breathing room above and below the figure.`,
-    NEGATIVE_AVATAR_PROMPT,
+    isHistoricalPhilosopher ? HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT : NEGATIVE_AVATAR_PROMPT,
   ].join('\n');
 };
 
@@ -604,7 +613,13 @@ const generateVoiceEssay = async (
   outline: AnalysisOutline,
   voicePlan: AnalysisOutline['voicePlans'][number],
   onDelta?: (delta: string, fullText: string) => void,
+  onStep?: (message: string) => void,
 ): Promise<ThoughtVoice> => {
+  onStep?.(`${voicePlan.name} 正在并行生成正文与思想头像...`);
+  const avatarPromise = generateThoughtVoiceAvatar(topic, outline, voicePlan).catch((error) => {
+    console.warn(`[sophia] 思想声音头像生成失败：${voicePlan.name}`, error);
+    return undefined;
+  });
   const argument = await callChatText([
     { role: 'system', content: voiceSystemPrompt },
     {
@@ -632,6 +647,7 @@ const generateVoiceEssay = async (
     },
   ], 7000, onDelta);
 
+  onStep?.(`${voicePlan.name} 正在提炼摘要与可被批评处...`);
   const summary = await callChatJson<{ summaryForSynthesis: string; quote?: string; challenges?: string[] }>([
     { role: 'system', content: '你是哲学分析编辑。请把长文压缩成供最终综合判断使用的 JSON。只输出 JSON。' },
     {
@@ -644,10 +660,8 @@ const generateVoiceEssay = async (
     },
   ], 1000).catch(() => ({ summaryForSynthesis: voicePlan.stance || voicePlan.oneLine || '', quote: '', challenges: [] }));
 
-  const avatar = await generateThoughtVoiceAvatar(topic, outline, voicePlan).catch((error) => {
-    console.warn(`[sophia] 思想声音头像生成失败：${voicePlan.name}`, error);
-    return undefined;
-  });
+  onStep?.(`${voicePlan.name} 正在等待并行头像完成...`);
+  const avatar = await avatarPromise;
 
   return {
     id: voicePlan.id,
@@ -827,6 +841,17 @@ export const analyzeTopic = async (
       });
 
       try {
+        const reportVoiceStep = (message: string) => {
+          callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message);
+          report({
+            stage: 'voices',
+            modeLabel: outline.modeLabel,
+            totalVoices: outline.voicePlans.length,
+            completedVoices: voices.length,
+            currentVoiceName: voicePlan.name,
+            messages: [message],
+          });
+        };
         const voice = await generateVoiceEssay(userTopic, outline, voicePlan, (delta, fullText) => {
           callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText);
           report({
@@ -838,7 +863,7 @@ export const analyzeTopic = async (
             streamedChars: fullText.length,
             messages: [`${voicePlan.name} 正在生成长篇论述...`],
           });
-        }).catch(async () => generateVoiceEssay(userTopic, outline, voicePlan));
+        }, reportVoiceStep).catch(async () => generateVoiceEssay(userTopic, outline, voicePlan, undefined, reportVoiceStep));
         voices.push(voice);
         callbacks.onVoiceComplete?.(voice);
         report({

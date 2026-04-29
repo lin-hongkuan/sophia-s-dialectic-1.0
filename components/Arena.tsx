@@ -272,7 +272,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
                     <h3 className="font-serif text-2xl md:text-3xl text-museum-900 mb-4">{node.title}</h3>
                     <p className="text-museum-800 leading-relaxed mb-4">{node.plain}</p>
                     {node.philosophical && <p className="text-museum-600 leading-relaxed italic border-l-2 border-museum-200 pl-4">{node.philosophical}</p>}
-                    {node.tension && <p className="mt-4 text-sm font-medium text-museum-900 bg-museum-50 p-3">张力：{node.tension}</p>}
+                    {node.tension && <p className="mt-4 text-sm font-medium text-museum-900 bg-museum-50 p-3">{node.tension}</p>}
                   </div>
                 </div>
               </div>

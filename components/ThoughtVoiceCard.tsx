@@ -232,7 +232,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
   const toggleExpanded = () => setIsExpanded((current) => !current);
 
   const metaPanel = (
-    <aside className={`relative lg:w-[27%] xl:w-[24%] shrink-0 bg-museum-50/72 backdrop-blur-[4px] border-museum-200 p-5 md:p-6 lg:p-7 xl:p-8 flex flex-col ${isReversed ? 'lg:border-l' : 'lg:border-r'}`}>
+    <aside className={`relative lg:w-[27%] xl:w-[24%] shrink-0 bg-museum-50/64 backdrop-blur-[4px] border-museum-200 p-5 md:p-6 lg:p-7 xl:p-8 flex flex-col ${isReversed ? 'lg:border-l' : 'lg:border-r'}`}>
       <div className="pointer-events-none absolute inset-x-5 top-5 h-px bg-gradient-to-r from-transparent via-museum-300/70 to-transparent" />
       <div>
         <div className="flex flex-wrap gap-2 mb-6">
@@ -301,14 +301,14 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
       </div>
 
       {normalizedQuote && (
-        <figure className="hidden lg:block mt-8 border border-museum-200/80 bg-white/52 backdrop-blur-[2px] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
-          <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-museum-400">
+        <figure className="hidden lg:block mt-8 relative overflow-hidden border border-museum-200/90 bg-gradient-to-br from-white/ via-museum-50/38 to-white/20 backdrop-blur-[2px] px-5 py-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.82),0_12px_30px_rgba(44,42,38,0.06)]">
+          <span className="absolute right-4 top-3 font-serif text-5xl leading-none text-museum-200/70" aria-hidden="true">※</span>
+          <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-[0.26em] text-museum-400">
             <span className="h-px w-7 bg-museum-300" aria-hidden="true" />
             引文
           </div>
-          <blockquote className="relative font-serif italic text-museum-700 leading-relaxed">
-            <span className="absolute -left-1 -top-5 text-4xl leading-none text-museum-200/95" aria-hidden="true">※</span>
-            <span className="relative z-10">「{normalizedQuote}」</span>
+          <blockquote className="relative border-l border-museum-300/80 pl-4 font-serif text-lg italic text-museum-900 leading-relaxed">
+            <span>「{normalizedQuote}」</span>
           </blockquote>
         </figure>
       )}
@@ -345,7 +345,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
   );
 
   const articlePanel = (
-    <section className="flex-1 min-w-0 bg-white/86 backdrop-blur-[3px] p-5 md:p-7 lg:p-9 xl:p-10">
+    <section className="flex-1 min-w-0 bg-white/76 backdrop-blur-[3px] p-5 md:p-7 lg:p-9 xl:p-10">
       {detailTiles}
 
       <div className="mb-8">
@@ -407,17 +407,21 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
       </div>
 
       {normalizedQuote && (
-        <figure className="lg:hidden relative bg-white/68 backdrop-blur-[2px] p-6 border-l-4 border-museum-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
-          <span className="absolute top-4 left-5 font-serif text-4xl leading-none text-museum-200/95" aria-hidden="true">※</span>
-          <blockquote className="text-lg font-serif italic text-museum-900 pl-8 relative z-10 leading-relaxed">「{normalizedQuote}」</blockquote>
+        <figure className="lg:hidden relative overflow-hidden border border-museum-200/90 bg-gradient-to-br from-white/46 via-museum-50/40 to-white/22 backdrop-blur-[2px] px-6 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]">
+          <span className="absolute right-5 top-4 font-serif text-5xl leading-none text-museum-200/75" aria-hidden="true">※</span>
+          <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-museum-400">
+            <span className="h-px w-7 bg-museum-300" aria-hidden="true" />
+            引文
+          </div>
+          <blockquote className="relative border-l border-museum-300/80 pl-4 text-xl font-serif italic text-museum-900 leading-relaxed">「{normalizedQuote}」</blockquote>
         </figure>
       )}
     </section>
   );
 
   return (
-    <article className="relative w-full min-w-0 overflow-hidden border border-museum-200/95 shadow-sm bg-white/60 backdrop-blur-[4px] transition-all duration-500 hover:-translate-y-0.5 hover:shadow-[0_24px_64px_rgba(44,42,38,0.10)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.78),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.52),rgba(242,240,235,0.18)_45%,rgba(255,255,255,0.34))] pointer-events-none" />
+    <article className="relative w-full min-w-0 overflow-hidden border border-museum-200/90 shadow-sm bg-white/50 backdrop-blur-[4px] transition-all duration-500 hover:-translate-y-0.5 hover:shadow-[0_24px_64px_rgba(44,42,38,0.10)]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.62),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.38),rgba(242,240,235,0.14)_45%,rgba(255,255,255,0.24))] pointer-events-none" />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-museum-300/80 to-transparent pointer-events-none" />
       <div className={`relative flex flex-col lg:flex-row ${isReversed ? 'lg:flex-row-reverse' : ''}`}>
         {metaPanel}

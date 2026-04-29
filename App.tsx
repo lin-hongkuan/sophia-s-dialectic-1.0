@@ -346,6 +346,7 @@ const App: React.FC = () => {
           },
         } : run),
         onVoiceDelta: (voiceId, _delta, fullText) => scheduleVoiceTextFlush(voiceId, fullText),
+        onVoiceStep: (voiceId, _voiceName, _message) => flushVoiceText(voiceId),
         onVoiceComplete: (voice: ThoughtVoice) => {
           clearVoiceFlush(voice.id);
           updateActiveRun(runId, (run) => run.result ? {
@@ -537,11 +538,19 @@ const App: React.FC = () => {
               </button>
             </form>
 
-            {activeRunIsRunning && (
-              <button onClick={openActiveRun} className="mt-5 text-xs font-mono uppercase tracking-widest text-museum-600 hover:text-museum-900 underline underline-offset-4">
-                回到正在生成的问题
-              </button>
-            )}
+            <div className="mt-5 flex flex-col items-center gap-3">
+              {activeRunIsRunning ? (
+                <button onClick={openActiveRun} className="text-xs font-mono uppercase tracking-widest text-museum-600 hover:text-museum-900 underline underline-offset-4">
+                  回到正在生成的问题
+                </button>
+              ) : (
+                <button onClick={() => openRoute('/history/sample')} className="text-xs font-mono uppercase tracking-[0.2em] text-museum-500 hover:text-museum-800 transition-colors flex items-center gap-2 group">
+                  <span className="inline-block w-8 h-px bg-museum-300 group-hover:w-4 transition-all duration-300"></span>
+                  Explore Preloaded Sample
+                  <span className="inline-block w-8 h-px bg-museum-300 group-hover:w-4 transition-all duration-300"></span>
+                </button>
+              )}
+            </div>
 
             <div className="mt-8 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-2">
               <div className="mb-1 flex w-full flex-col items-center justify-center gap-3 md:mb-2 md:flex-row">

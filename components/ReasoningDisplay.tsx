@@ -10,9 +10,9 @@ interface ReasoningDisplayProps {
 
 const stageLabel: Record<string, string> = {
   idle: '等待提问',
-  outline: '结构整理',
-  route: '路线图',
-  voices: '思想展开',
+  outline: '整理问题结构',
+  route: '生成论证路线',
+  voices: '生成思想声音',
   synthesis: '综合判断',
   done: '完成',
   error: '遇到错误',
@@ -23,7 +23,7 @@ const stageOrder = ['outline', 'route', 'voices', 'synthesis', 'done'];
 const stageSteps = [
   { key: 'outline', title: '整理问题结构', description: '把原始困惑改写成大问题、关键词和阅读框架。', icon: BrainCircuit },
   { key: 'route', title: '补全论证路线', description: '把分析路径拆成可阅读的节点和张力。', icon: Search },
-  { key: 'voices', title: '生成思想声音', description: '并发写作每一种立场的长篇论述。', icon: BookOpen },
+  { key: 'voices', title: '生成思想声音', description: '并发写作每一种立场的长篇论述与头像。', icon: BookOpen },
   { key: 'synthesis', title: '整理分歧与结论', description: '收束关键词、争论焦点和继续追问。', icon: Scale },
 ];
 
@@ -31,6 +31,27 @@ const formatElapsed = (seconds: number) => {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
+};
+
+const formatStageNumber = (stage: string, isDone: boolean) => {
+  if (isDone || stage === 'done') return `${stageSteps.length}/${stageSteps.length}`;
+  const index = stageSteps.findIndex((step) => step.key === stage);
+  return index >= 0 ? `${index + 1}/${stageSteps.length}` : '—';
+};
+
+const estimatePercent = (stage: string, total: number, completed: number, streamedChars?: number) => {
+  if (stage === 'done') return 100;
+  if (stage === 'error') return 0;
+  if (stage === 'outline') return 12;
+  if (stage === 'route') return 30;
+  if (stage === 'synthesis') return 86;
+  if (stage !== 'voices') return 0;
+
+  const completedVoicePercent = total > 0 ? (completed / total) * 38 : 0;
+  const currentVoiceBoost = total > 0 && completed < total && streamedChars
+    ? Math.min(8, Math.floor(streamedChars / 450))
+    : 0;
+  return Math.min(82, Math.round(42 + completedVoicePercent + currentVoiceBoost));
 };
 
 const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress }) => {
@@ -56,19 +77,31 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
   const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
   const total = progress?.totalVoices || 0;
   const completed = progress?.completedVoices || 0;
-  const stageBasePercent = currentStage === 'outline' ? 12 : currentStage === 'route' ? 28 : currentStage === 'voices' ? 45 : currentStage === 'synthesis' ? 82 : currentStage === 'done' ? 100 : 0;
-  const voicePercent = total > 0 ? Math.round((completed / total) * 32) : 0;
-  const percent = currentStage === 'voices' ? Math.min(78, 45 + voicePercent) : stageBasePercent;
+  const percent = isDone ? 100 : estimatePercent(currentStage, total, completed, progress?.streamedChars);
+  const stageNumber = formatStageNumber(currentStage, isDone);
+  const activeStepIndex = stageSteps.findIndex((step) => step.key === currentStage);
+  const completedStageCount = isDone ? stageSteps.length : Math.max(0, activeStepIndex);
+  const activeVoiceOrdinal = total > 0 ? Math.min(total, completed + 1) : 0;
 
   const rotatingHint = useMemo(() => {
-    if (currentStage === 'voices' && progress?.currentVoiceName) return `${progress.currentVoiceName} 正在写作`;
-    if (currentStage === 'voices') return '多个思想声音正在并发生成';
-    if (currentStage === 'synthesis') return '正在把分歧、关键词和继续追问收束到一起';
-    if (currentStage === 'route') return '正在把问题拆成可以阅读的路线';
-    if (currentStage === 'done') return '分析已经完成';
+    if (currentStage === 'voices' && progress?.currentVoiceName) return `${progress.currentVoiceName} 正在写作，第 ${activeVoiceOrdinal}/${total} 个思想声音`;
+    if (currentStage === 'voices') return `正在并发生成 ${total || '多个'} 个思想声音`;
+    if (currentStage === 'synthesis') return '思想声音已收束，正在整理分歧、关键词和继续追问';
+    if (currentStage === 'route') return '问题结构已完成，正在补全论证路线图';
+    if (currentStage === 'done') return '分析已经完成，可以阅读完整结果';
     if (currentStage === 'error') return progress?.messages?.[0] || '生成遇到错误';
     return '正在把原始困惑改写成思想地图';
-  }, [currentStage, progress]);
+  }, [activeVoiceOrdinal, currentStage, progress, total]);
+
+  const nextStep = useMemo(() => {
+    if (currentStage === 'outline') return '下一步：生成论证路线图';
+    if (currentStage === 'route') return '下一步：开始生成各个思想声音';
+    if (currentStage === 'voices') return completed >= total && total > 0 ? '下一步：综合判断' : '继续：完成剩余思想声音';
+    if (currentStage === 'synthesis') return '下一步：呈现完整分析结果';
+    if (currentStage === 'done') return '已完成：可以开始阅读';
+    if (currentStage === 'error') return '请查看错误信息后重试';
+    return '等待开始';
+  }, [completed, currentStage, total]);
 
   return (
     <div className={`transition-all duration-700 ease-in-out ${isDone ? 'opacity-80 py-4' : 'opacity-100 py-8'}`}>
@@ -79,24 +112,42 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
             <div>
               <span className="font-serif italic text-museum-900">Sophia 的思想工作台</span>
               <p className="text-xs font-mono uppercase tracking-widest text-museum-400 mt-1">
-                {stageLabel[currentStage]} {progress?.modeLabel ? `· ${progress.modeLabel}` : ''}
+                第 {stageNumber} 步 · {stageLabel[currentStage]} {progress?.modeLabel ? `· ${progress.modeLabel}` : ''}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4 text-xs font-mono uppercase tracking-widest text-museum-500">
+          <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-widest text-museum-500 md:justify-end">
             <span>{formatElapsed(elapsed)}</span>
-            {total > 0 && <span>{completed}/{total} voices</span>}
-            {typeof progress?.streamedChars === 'number' && <span>{progress.streamedChars} chars</span>}
+            {total > 0 && <span>{completed}/{total} 个声音完成</span>}
+            {typeof progress?.streamedChars === 'number' && <span>当前声音 {progress.streamedChars} 字</span>}
           </div>
         </div>
 
         <div className="mb-5">
-          <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest text-museum-400 mb-2">
+          <div className="flex justify-between gap-4 text-[10px] font-mono uppercase tracking-widest text-museum-400 mb-2">
             <span>{rotatingHint}</span>
-            <span>{percent}%</span>
+            <span>{isDone ? '100%' : `约 ${percent}%`}</span>
           </div>
           <div className="h-2 bg-museum-100 rounded-full overflow-hidden">
             <div className="h-full bg-museum-900 transition-all duration-700 ease-out" style={{ width: `${percent}%` }} />
+          </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-1 gap-3 border border-museum-100 bg-museum-50/50 p-4 md:grid-cols-3">
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">当前阶段</p>
+            <p className="mt-1 font-serif text-lg text-museum-900">{stageLabel[currentStage]}</p>
+            <p className="mt-1 text-xs text-museum-500">已完成 {completedStageCount}/{stageSteps.length} 个大步骤</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">思想声音</p>
+            <p className="mt-1 font-serif text-lg text-museum-900">{total > 0 ? `${completed}/${total}` : '等待确定'}</p>
+            <p className="mt-1 truncate text-xs text-museum-500">{progress?.currentVoiceName ? `正在展开：${progress.currentVoiceName}` : '尚未进入长篇声音生成'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">接下来</p>
+            <p className="mt-1 font-serif text-lg text-museum-900">{nextStep}</p>
+            <p className="mt-1 text-xs text-museum-500">进度条为阶段估算，会随完成节点更新</p>
           </div>
         </div>
 
@@ -113,6 +164,9 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
                     {complete && !active ? <CheckCircle2 className="w-4 h-4 text-emerald-700" /> : active ? <Loader2 className="w-4 h-4 animate-spin" /> : idx === 0 ? <Icon className="w-4 h-4 text-museum-500" /> : <Circle className="w-3 h-3 text-museum-300" />}
                   </div>
                   <div>
+                    <p className={`mb-1 text-[10px] font-mono uppercase tracking-widest ${active ? 'text-museum-300' : complete ? 'text-emerald-700' : 'text-museum-400'}`}>
+                      {complete ? '已完成' : active ? '正在进行' : '等待中'} · 第 {idx + 1}/{stageSteps.length} 步
+                    </p>
                     <h3 className={`font-serif text-lg ${active ? 'text-museum-50' : 'text-museum-900'}`}>{step.title}</h3>
                     <p className={`text-xs leading-relaxed mt-1 ${active ? 'text-museum-200' : 'text-museum-500'}`}>{step.description}</p>
                   </div>
@@ -124,8 +178,9 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
 
         {progress?.messages?.length ? (
           <div className="mt-5 border-t border-museum-100 pt-4 space-y-2">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">最新生成动态</p>
             {progress.messages.slice(-3).map((message, idx) => (
-              <p key={`${message}-${idx}`} className="text-sm font-mono text-museum-700 leading-relaxed">{message}</p>
+              <p key={`${message}-${idx}`} className="text-sm font-mono text-museum-700 leading-relaxed">· {message}</p>
             ))}
           </div>
         ) : null}
