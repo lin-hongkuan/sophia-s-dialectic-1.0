@@ -157,7 +157,7 @@ const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoice
       type: 'generated',
       src: voice.avatar.imageUrl,
       alt: voice.avatar.alt || `${voice.name} 的思想声音头像`,
-      title: `${voice.name} · 由 ${voice.avatar.model} 生成的方形思想声音头像。`,
+      title: `${voice.name} · 由 ${voice.avatar.model} 生成的竖版思想声音头像。`,
     };
   }
 

@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => {
   const sophiaApiBaseUrl = env.SOPHIA_API_BASE_URL || process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1';
   const sophiaApiModel = env.SOPHIA_API_MODEL || process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini';
   const sophiaImageModel = env.SOPHIA_IMAGE_MODEL || process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite';
+  const sophiaImageSize = env.SOPHIA_IMAGE_SIZE || process.env.SOPHIA_IMAGE_SIZE || '1024x1024';
+  const sophiaImageAspectHint = env.SOPHIA_IMAGE_ASPECT_HINT || process.env.SOPHIA_IMAGE_ASPECT_HINT || 'portrait 1:1.2 aspect ratio';
   const sophiaApiProvider = env.SOPHIA_API_PROVIDER || process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible';
   const sophiaApiProxyPath = '/sophia-api';
   const useLocalApiProxy = env.GITHUB_ACTIONS !== 'true' && process.env.GITHUB_ACTIONS !== 'true';
@@ -49,8 +51,10 @@ export default defineConfig(({ mode }) => {
       'process.env.SOPHIA_API_BASE_URL': JSON.stringify(useLocalApiProxy ? sophiaApiProxyPath : sophiaApiBaseUrl),
       'process.env.SOPHIA_API_MODEL': JSON.stringify(sophiaApiModel),
       'process.env.SOPHIA_IMAGE_MODEL': JSON.stringify(sophiaImageModel),
+      'process.env.SOPHIA_IMAGE_SIZE': JSON.stringify(sophiaImageSize),
+      'process.env.SOPHIA_IMAGE_ASPECT_HINT': JSON.stringify(sophiaImageAspectHint),
       'process.env.SOPHIA_API_PROVIDER': JSON.stringify(sophiaApiProvider),
-      'process.env.SOPHIA_API_CONFIGURED': JSON.stringify(Boolean(sophiaApiKey)),
+      'process.env.SOPHIA_API_CONFIGURED': JSON.stringify(sophiaApiKey ? 'true' : 'false'),
     },
     resolve: {
       alias: {

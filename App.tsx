@@ -15,9 +15,9 @@ type SelectedSource = 'active' | 'history' | null;
 
 const HISTORY_KEY = 'sophia.history.v1';
 const HISTORY_LIMIT = 10;
-const PRESET_HISTORY_KEY = 'sophia.preset.generated.v1';
-const PRESET_TOPIC = '我们应该生孩子吗？';
-const DEFAULT_QUESTION_SUGGESTIONS = ['如何克服虚无主义？', '女权主义有道理吗？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
+const PRESET_HISTORY_KEY = 'sophia.preset.generated.feminism.v1';
+const PRESET_TOPIC = '女性主义有道理吗？';
+const DEFAULT_QUESTION_SUGGESTIONS = ['女性主义有道理吗？', '如何克服虚无主义？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
 const API_CONFIGURED = process.env.SOPHIA_API_CONFIGURED === 'true';
 
 const makeRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -141,7 +141,7 @@ const App: React.FC = () => {
 
   const persistGeneratedPreset = (nextResult: AnalysisResult) => {
     const entry: HistoryEntry = {
-      id: 'preset-generated-should-we-have-children',
+      id: 'preset-generated-feminism',
       topic: nextResult.topic,
       title: nextResult.philosophical_title,
       mode: nextResult.mode,

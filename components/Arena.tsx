@@ -350,15 +350,15 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
 
       <div className="max-w-4xl mx-auto mt-20 bg-white/80 backdrop-blur-sm border border-museum-200 shadow-sm p-6 md:p-8">
         <div className="border-b border-museum-100 pb-5 mb-6">
-          <p className="text-xs uppercase tracking-widest text-museum-400 mb-2">Margin Note</p>
-          <h3 className="font-serif text-3xl text-museum-900">你的旁注</h3>
-          <p className="text-museum-600 leading-relaxed mt-3">写下你暂时站在哪里，Sophia 会帮你看见这个立场的代价。</p>
+          <p className="text-xs uppercase tracking-widest text-museum-400 mb-2">Continue with Sophia</p>
+          <h3 className="font-serif text-3xl text-museum-900">继续追问 Sophia</h3>
+          <p className="text-museum-600 leading-relaxed mt-3">把你还没想通的地方写成一个追问，Sophia 会沿着当前分析继续和你对话。</p>
         </div>
         <div className="relative">
           <textarea
             value={reflection}
             onChange={(e) => setReflection(e.target.value)}
-            placeholder="写下你现在更接近哪一种立场，或者哪一处仍然不服。"
+            placeholder="例如：这个立场最容易忽略谁的经验？如果我反过来追问，会在哪里卡住？"
             className="w-full p-6 bg-museum-50/80 border border-museum-200 focus:outline-none focus:ring-2 focus:ring-museum-200 min-h-[160px] font-serif text-lg text-museum-900 resize-none"
           />
           <button
@@ -366,14 +366,14 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, isGenerating }
             disabled={isGettingFeedback || !reflection}
             className="mt-4 md:mt-0 md:absolute md:bottom-4 md:right-4 bg-museum-900 text-white px-6 py-2 hover:bg-black transition-colors disabled:opacity-50 text-sm font-medium tracking-wide"
           >
-            {isGettingFeedback ? '正在批注...' : '请 Sophia 批注'}
+            {isGettingFeedback ? 'Sophia 正在回应...' : '继续对话'}
           </button>
         </div>
 
         {feedback && (
           <div className="mt-8 p-6 bg-white/90 border border-museum-200 animate-fade-in backdrop-blur-md border-l-4 border-l-museum-800">
             <h4 className="font-serif text-2xl text-museum-900 mb-3 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-700" /> Sophia 的旁注
+              <Sparkles className="w-4 h-4 text-amber-700" /> Sophia 的回应
             </h4>
             <p className="text-museum-800 leading-relaxed whitespace-pre-line">{feedback}</p>
           </div>

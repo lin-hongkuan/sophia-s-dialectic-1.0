@@ -20,6 +20,8 @@ const apiBaseUrl = (process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.
 const apiModel = process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini';
 const avatarImageModel = process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite';
 const apiProvider = process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible';
+const avatarImageSize = process.env.SOPHIA_IMAGE_SIZE || '1024x1024';
+const avatarAspectHint = process.env.SOPHIA_IMAGE_ASPECT_HINT || 'portrait 1:1.2 aspect ratio';
 const API_URL = `${apiBaseUrl}/chat/completions`;
 const IMAGE_API_URL = `${apiBaseUrl}/images/generations`;
 const requestHeaders = () => ({
@@ -74,7 +76,7 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
         model: avatarImageModel,
         prompt,
         n: 1,
-        size: '1024x1024',
+        size: avatarImageSize,
         response_format: 'b64_json',
       }),
     });
@@ -126,7 +128,7 @@ export const buildThoughtVoiceAvatarPrompt = (
     `User question being analyzed: ${topic}`,
     `Big question: ${outline.philosophical_title}`,
     `Analytical mode: ${outline.modeLabel}`,
-    'Composition: square 1:1 framing, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere.',
+    `Composition: ${avatarAspectHint}, slightly taller-than-wide editorial portrait, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere. Avoid square crop; leave quiet vertical breathing room above and below the figure.`,
     NEGATIVE_AVATAR_PROMPT,
   ].join('\n');
 };
@@ -143,7 +145,7 @@ export const generateThoughtVoiceAvatar = async (
     prompt,
     style: THOUGHT_VOICE_AVATAR_STYLE,
     model: avatarImageModel,
-    alt: `${voicePlan.name} 的方形思想声音头像`,
+    alt: `${voicePlan.name} 的竖版思想声音头像`,
     generatedAt: new Date().toISOString(),
     subjectType: voicePlan.kind,
   };
@@ -912,7 +914,7 @@ ${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入
 要求：
 - 每个问题 8-22 个中文字符左右，必须以问号结尾。
 - 问题要具体、有张力、普通人也愿意点击。
-- 不要重复“我们应该生孩子吗？”这类已有问题。
+- 不要重复首页已有问题；如果用户给了当前兴趣，围绕它生成更尖锐的变体。
 - 不要输出解释。
 
 输出 JSON：{"questions":["问题1？","问题2？","问题3？","问题4？","问题5？"]}`,
@@ -928,11 +930,11 @@ export const getReflectionFeedback = async (topic: string, userReflection: strin
     return await callChatText([
       {
         role: 'system',
-        content: `你是 Sophia，一个哲学批注者。请用简体中文回应用户反思。要尖锐、鼓励、严谨，并连接到具体哲学立场。`,
+        content: `你是 Sophia，一个哲学对话者。请用简体中文回应用户追问。要尖锐、鼓励、严谨，并连接到具体哲学立场；不要把它写成作文批改，而要像继续追问的对话。`,
       },
       {
         role: 'user',
-        content: `分析主题：${topic}\n用户旁注：${userReflection}\n\n请给出 300-600 字批注。`,
+        content: `分析主题：${topic}\n用户追问：${userReflection}\n\n请像在和用户继续对话一样回应：先指出这个追问真正卡住的概念，再给出 1-2 个可能的思想路径，最后反问一个更准确的下一问。300-600 字。`,
       },
     ], 1200);
   } catch (error) {
