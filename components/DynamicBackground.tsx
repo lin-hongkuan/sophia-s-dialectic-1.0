@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Float, MeshDistortMaterial, Sphere, Torus, Stars, Environment } from '@react-three/drei';
 import * as THREE from 'three';
@@ -99,6 +99,21 @@ interface BackgroundSceneProps {
 }
 
 const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = false }) => {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth < 768);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(147,51,234,0.12),transparent_28%),radial-gradient(circle_at_85%_10%,rgba(197,160,89,0.16),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.86),rgba(242,240,235,0.72))]" />
+    );
+  }
+
   return (
     <>
       <div className="fixed inset-0 z-0 opacity-30 pointer-events-none">

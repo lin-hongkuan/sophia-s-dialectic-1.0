@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { analyzeTopic, createPartialResult, generateQuestionSuggestions } from './services/sophiaService';
+import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions } from './services/sophiaService';
 import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, HistoryEntry, ThoughtVoice } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
@@ -131,6 +131,7 @@ const App: React.FC = () => {
   const [questionSuggestions, setQuestionSuggestions] = useState<string[]>(DEFAULT_QUESTION_SUGGESTIONS);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
+  const [isAppendingVoice, setIsAppendingVoice] = useState(false);
   const activeRunIdRef = useRef<string | null>(null);
 
   const openRoute = (route: AppRoute, replace = false) => {
@@ -263,6 +264,16 @@ const App: React.FC = () => {
       if (!current || current.runId !== runId) return current;
       return updater(current);
     });
+  };
+
+  const updateDisplayedResult = (updater: (result: AnalysisResult) => AnalysisResult) => {
+    if (selectedSource === 'active') {
+      setActiveRun((current) => current?.result ? { ...current, result: updater(current.result) } : current);
+      return;
+    }
+    if (selectedSource === 'history') {
+      setSelectedHistoryResult((current) => current ? updater(current) : current);
+    }
   };
 
   const startAnalysis = async (nextTopic: string, continuationContext?: ContinuationContext, isPresetRegeneration = false) => {
@@ -447,6 +458,85 @@ const App: React.FC = () => {
     startAnalysis(question, continuationContext);
   };
 
+  const handleAppendThoughtVoice = async (prompt: string) => {
+    const baseResult = displayedResult;
+    const trimmedPrompt = prompt.trim();
+    if (!baseResult || !trimmedPrompt || isAppendingVoice || activeRunIsRunning) return;
+
+    setIsAppendingVoice(true);
+    const sourceResult = selectedSource === 'history' && (baseResult.id === PRELOADED_HISTORY_ENTRY.result.id || baseResult.id === presetEntry.result.id)
+      ? { ...baseResult, id: makeRunId(), createdAt: new Date().toISOString() }
+      : baseResult;
+
+    if (sourceResult !== baseResult) {
+      pushRoute(`/history/${encodeURIComponent(sourceResult.id)}`);
+      setSelectedHistoryResult(sourceResult);
+      setTopic(sourceResult.topic);
+    }
+
+    const pendingVoiceText = new Map<string, string>();
+    const voiceFlushTimers = new Map<string, number>();
+
+    const clearVoiceFlush = (voiceId: string) => {
+      const timer = voiceFlushTimers.get(voiceId);
+      if (timer) window.clearTimeout(timer);
+      voiceFlushTimers.delete(voiceId);
+      pendingVoiceText.delete(voiceId);
+    };
+
+    const flushVoiceText = (voiceId: string) => {
+      const fullText = pendingVoiceText.get(voiceId);
+      clearVoiceFlush(voiceId);
+      if (fullText === undefined) return;
+      updateDisplayedResult((result) => ({
+        ...result,
+        voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, argument: fullText, status: 'generating' } : voice),
+      }));
+    };
+
+    const scheduleVoiceTextFlush = (voiceId: string, fullText: string) => {
+      pendingVoiceText.set(voiceId, fullText);
+      if (voiceFlushTimers.has(voiceId)) return;
+      const timer = window.setTimeout(() => flushVoiceText(voiceId), 120);
+      voiceFlushTimers.set(voiceId, timer);
+    };
+
+    const clearAllVoiceFlushes = () => {
+      voiceFlushTimers.forEach((timer) => window.clearTimeout(timer));
+      voiceFlushTimers.clear();
+      pendingVoiceText.clear();
+    };
+
+    try {
+      const updatedResult = await appendThoughtVoice(sourceResult, trimmedPrompt, {
+        onVoicePlanned: (voice) => updateDisplayedResult((result) => ({ ...result, voices: [...result.voices, voice] })),
+        onVoiceStart: (voiceId) => updateDisplayedResult((result) => ({
+          ...result,
+          voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating' } : voice),
+        })),
+        onVoiceDelta: (voiceId, _delta, fullText) => scheduleVoiceTextFlush(voiceId, fullText),
+        onVoiceStep: (voiceId) => flushVoiceText(voiceId),
+        onVoiceComplete: (voice) => {
+          clearVoiceFlush(voice.id);
+          updateDisplayedResult((result) => ({
+            ...result,
+            voices: result.voices.map((item) => item.id === voice.id ? voice : item),
+          }));
+        },
+        onSynthesis: (partial) => updateDisplayedResult((result) => ({ ...result, ...partial })),
+      });
+
+      clearAllVoiceFlushes();
+      updateDisplayedResult(() => updatedResult);
+      persistResult(updatedResult);
+    } catch (error) {
+      console.error('[Sophia] append voice failed:', error);
+    } finally {
+      clearAllVoiceFlushes();
+      setIsAppendingVoice(false);
+    }
+  };
+
   const handleRegeneratePreset = () => {
     startAnalysis(PRESET_TOPIC, undefined, true);
   };
@@ -479,9 +569,9 @@ const App: React.FC = () => {
               <p className="mt-1 hidden text-[9px] font-mono uppercase tracking-[0.24em] text-museum-500 sm:block md:text-[10px]">Dialectic Engine</p>
             </div>
           </button>
-          <div className="flex items-center space-x-6">
-            <button onClick={goHistory} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">History</button>
-            <button onClick={goManifesto} className="hidden md:block text-xs uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors">Manifesto</button>
+          <div className="flex items-center gap-2 md:gap-6">
+            <button onClick={goHistory} className="rounded-full border border-museum-200/80 bg-white/45 px-3 py-1.5 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
+            <button onClick={goManifesto} className="rounded-full border border-museum-200/80 bg-white/45 px-3 py-1.5 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
           </div>
         </div>
       </nav>
@@ -501,7 +591,7 @@ const App: React.FC = () => {
                 <span className="block whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">The Philosophical Engine</span>
               </div>
 
-              <h1 className="font-serif text-5xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
+              <h1 className="font-serif text-4xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.92] sm:leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
                 Sophia's<br />
                 <span className="italic relative inline-block">
                   Dialectic
@@ -525,8 +615,8 @@ const App: React.FC = () => {
                 type="text"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder={activeRunIsRunning ? '已有问题正在生成，可先回到它。' : 'What is your dialectic today? (输入困惑...)'}
-                className="relative w-full px-5 py-4 md:px-8 md:py-6 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-300 focus:ring-0 focus:shadow-[0_8px_40px_rgb(0,0,0,0.08)] transition-all duration-300 placeholder:text-museum-300 font-serif text-center md:text-left backdrop-blur-md disabled:opacity-70"
+                placeholder={activeRunIsRunning ? '已有问题正在生成。' : '输入一个困惑...'}
+                className="relative w-full px-5 py-4 pr-16 md:px-8 md:py-6 md:pr-20 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-300 focus:ring-0 focus:shadow-[0_8px_40px_rgb(0,0,0,0.08)] transition-all duration-300 placeholder:text-museum-300 font-serif text-left backdrop-blur-md disabled:opacity-70"
                 disabled={activeRunIsRunning}
               />
               <button
@@ -552,7 +642,7 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <div className="mt-8 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-2">
+            <div className="mt-7 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-1 md:px-2">
               <div className="mb-1 flex w-full flex-col items-center justify-center gap-3 md:mb-2 md:flex-row">
                 <span className="text-center text-[10px] font-mono uppercase tracking-widest text-museum-400 md:text-xs">Philosophy as a Program</span>
                 <button
@@ -570,7 +660,7 @@ const App: React.FC = () => {
                   key={suggestion}
                   onClick={() => setTopic(suggestion)}
                   disabled={activeRunIsRunning || isGeneratingSuggestions}
-                  className="px-3 py-1.5 md:px-5 md:py-2.5 bg-white/60 border border-museum-200 rounded-lg text-xs md:text-sm text-museum-700 hover:border-museum-400 hover:shadow-md hover:bg-white hover:-translate-y-0.5 transition-all duration-300 font-medium backdrop-blur-sm disabled:opacity-50 disabled:hover:translate-y-0"
+                  className="px-3 py-1.5 md:px-5 md:py-2.5 bg-white/60 border border-museum-200 rounded-lg text-[11px] md:text-sm text-museum-700 hover:border-museum-400 hover:shadow-md hover:bg-white hover:-translate-y-0.5 transition-all duration-300 font-medium backdrop-blur-sm disabled:opacity-50 disabled:hover:translate-y-0"
                 >
                   {suggestion}
                 </button>
@@ -631,7 +721,9 @@ const App: React.FC = () => {
                 data={displayedResult}
                 onReset={goHome}
                 onFollowUp={handleFollowUp}
+                onAppendThoughtVoice={handleAppendThoughtVoice}
                 isGenerating={selectedSource === 'active' && activeRunIsRunning}
+                isAppendingVoice={isAppendingVoice}
               />
             )}
           </>

@@ -102,6 +102,8 @@ export interface ThoughtVoice {
   avatar?: ThoughtVoiceImageAvatar;
   status?: VoiceStatus;
   error?: string;
+  addedByUserPrompt?: string;
+  addedAt?: string;
 }
 
 export interface TensionFocus {
@@ -197,6 +199,16 @@ export interface AnalyzeCallbacks {
   onProgress?: (progress: GenerationProgress) => void;
   onOutline?: (outline: AnalysisOutline) => void;
   onRouteMap?: (routeMap: RouteNode[]) => void;
+  onVoiceStart?: (voiceId: string, voiceName: string) => void;
+  onVoiceDelta?: (voiceId: string, delta: string, fullText: string) => void;
+  onVoiceStep?: (voiceId: string, voiceName: string, message: string) => void;
+  onVoiceComplete?: (voice: ThoughtVoice) => void;
+  onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
+  onError?: (message: string) => void;
+}
+
+export interface AppendVoiceCallbacks {
+  onVoicePlanned?: (voice: ThoughtVoice) => void;
   onVoiceStart?: (voiceId: string, voiceName: string) => void;
   onVoiceDelta?: (voiceId: string, delta: string, fullText: string) => void;
   onVoiceStep?: (voiceId: string, voiceName: string, message: string) => void;

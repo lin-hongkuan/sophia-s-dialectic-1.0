@@ -50,8 +50,8 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
   const activeProgress = activeRun?.progress;
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 pb-20 animate-fade-in -mt-8 md:-mt-12">
-      <div className="relative mx-auto max-w-4xl py-10 text-center md:py-14">
+    <div className="w-full max-w-6xl mx-auto px-4 pb-16 md:pb-20 animate-fade-in -mt-4 md:-mt-12">
+      <div className="relative mx-auto max-w-4xl py-7 text-center md:py-14">
         <div className="absolute left-1/2 top-0 hidden h-28 w-px -translate-x-1/2 bg-museum-300/80 md:block" />
         <div
           className="notranslate relative z-10 mb-5 mt-10 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8 md:mt-12"
@@ -60,7 +60,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
           <Archive className="mr-2 h-3.5 w-3.5 text-museum-600" />
           <span className="whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">Archive of Questions</span>
         </div>
-        <h1 className="font-serif text-5xl leading-[0.9] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
+        <h1 className="font-serif text-4xl leading-[0.92] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
           Sophia's<br />
           <span className="relative inline-block italic">
             History
@@ -123,7 +123,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
                   event.preventDefault();
                   onOpen(entry);
                 }}
-                className="block w-full text-left p-6 md:p-8"
+                className="block w-full text-left p-5 md:p-8"
               >
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div className="flex flex-wrap gap-2">
@@ -138,10 +138,10 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
                   </div>
                   <BookOpen className="w-5 h-5 text-museum-300 group-hover:text-museum-900 transition-colors" />
                 </div>
-                <h2 className="font-serif text-2xl md:text-3xl text-museum-900 leading-tight mb-4 group-hover:underline">
+                <h2 className="font-serif text-xl md:text-3xl text-museum-900 leading-tight mb-3 md:mb-4 group-hover:underline break-words">
                   {entry.title}
                 </h2>
-                <p className="text-museum-600 leading-relaxed mb-6">{entry.topic}</p>
+                <p className="text-sm md:text-base text-museum-600 leading-relaxed mb-5 md:mb-6 break-words">{entry.topic}</p>
                 <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-museum-400">
                   <Clock className="w-3 h-3" />
                   {new Date(entry.createdAt).toLocaleString('zh-CN')}

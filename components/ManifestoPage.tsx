@@ -41,9 +41,9 @@ const methodSteps = [
 
 const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-32 animate-fade-in -mt-4 md:-mt-8 text-museum-900">
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 md:pb-32 animate-fade-in -mt-2 md:-mt-8 text-museum-900">
       {/* Hero Section */}
-      <div className="relative mx-auto max-w-4xl py-10 text-center md:py-14 mb-4">
+      <div className="relative mx-auto max-w-4xl py-7 text-center md:py-14 mb-4">
         <div className="absolute left-1/2 top-0 hidden h-28 w-px -translate-x-1/2 bg-museum-300/80 md:block" />
         <div
           className="notranslate relative z-10 mb-5 mt-10 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8 md:mt-12"
@@ -52,7 +52,7 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
           <Sparkles className="mr-2 h-3.5 w-3.5 text-museum-600" />
           <span className="whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">Our Philosophy</span>
         </div>
-        <h1 className="font-serif text-5xl leading-[0.9] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
+        <h1 className="font-serif text-4xl leading-[0.92] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
           Sophia's<br />
           <span className="relative inline-block italic">
             Manifesto
@@ -67,7 +67,7 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
         </p>
       </div>
 
-      <div className="max-w-4xl mx-auto mb-16 relative z-10 rounded-2xl border border-museum-200/60 bg-white/50 p-8 sm:p-12 shadow-sm backdrop-blur-sm text-center">
+      <div className="max-w-4xl mx-auto mb-10 md:mb-16 relative z-10 rounded-2xl border border-museum-200/60 bg-white/50 p-5 sm:p-12 shadow-sm backdrop-blur-sm text-center">
         <div className="space-y-4 text-sm sm:text-base leading-loose text-museum-800 mx-auto">
           <p>当你带来一个现代困惑：要不要生孩子、如何面对虚无主义，或怎样证明自己不是缸中之脑。</p>
           <p>这里做的第一件事，不是立刻回答，而是把困惑拆解为问题的骨架。<br className="hidden sm:block"/>接着，不同的思想声音进入现场。它们不是为了排列名人名言，<br className="hidden sm:block"/>而是各自承担一种理解世界的方式：诊断、辩护、怀疑或反击。</p>
@@ -75,7 +75,7 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
       </div>
 
       {/* Methodology Section */}
-      <div className="mb-16">
+      <div className="mb-10 md:mb-16">
         <h3 className="mb-8 text-center font-serif text-3xl text-museum-800">思想展开的演进</h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4 relative">
           <div className="absolute top-1/2 left-4 right-4 h-px bg-museum-200 hidden md:block -z-10 -translate-y-1/2" />
@@ -96,11 +96,11 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
       </div>
 
       {/* Principles Section */}
-      <div className="mb-16">
+      <div className="mb-10 md:mb-16">
         <h3 className="mb-8 text-center font-serif text-3xl text-museum-800">底层设计哲学</h3>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {principles.map((principle, index) => (
-            <article key={principle.title} className="group relative overflow-hidden rounded-2xl border border-museum-200/90 bg-white/80 p-8 shadow-sm transition-all duration-300 hover:shadow-[0_8px_30px_rgba(44,42,38,0.06)] hover:bg-white">
+            <article key={principle.title} className="group relative overflow-hidden rounded-2xl border border-museum-200/90 bg-white/80 p-5 md:p-8 shadow-sm transition-all duration-300 hover:shadow-[0_8px_30px_rgba(44,42,38,0.06)] hover:bg-white">
               <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-museum-100/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-bl-3xl" aria-hidden="true" />
               <div className="mb-6 flex items-start justify-between gap-4 relative z-10">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-museum-200 bg-museum-50/80 text-museum-700 shadow-sm transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3 group-hover:bg-museum-100">
@@ -126,7 +126,7 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
       <section className="relative overflow-hidden rounded-2xl bg-museum-900 text-museum-50 shadow-xl">
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10" aria-hidden="true" />
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] relative z-10">
-          <div className="p-10 md:p-14 lg:border-r lg:border-white/10 flex flex-col justify-center bg-gradient-to-br from-museum-900 to-museum-800">
+          <div className="p-6 md:p-14 lg:border-r lg:border-white/10 flex flex-col justify-center bg-gradient-to-br from-museum-900 to-museum-800">
             <p className="mb-6 inline-flex border border-white/20 rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.2em] text-museum-300 w-max">
               Reading Contract
             </p>
@@ -138,7 +138,7 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
               好的回答，不是让问题消失，而是让你清晰地看见自己真正同意了什么。
             </p>
           </div>
-          <div className="p-10 md:p-14 bg-museum-900/50 flex flex-col justify-center">
+          <div className="p-6 md:p-14 bg-museum-900/50 flex flex-col justify-center">
             <div className="space-y-6 text-sm sm:text-base leading-loose text-museum-200">
               <p>
                 我们会尽量把宏大的哲学思想写得可读，但绝不会将它们压扁成心灵鸡汤。它允许一个问题暂时没有最终定论，也会坦诚地指出每一种解答背后不可回避的代价。

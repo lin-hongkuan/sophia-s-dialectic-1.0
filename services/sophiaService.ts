@@ -2,6 +2,7 @@ import {
   AnalysisOutline,
   AnalysisResult,
   AnalyzeCallbacks,
+  AppendVoiceCallbacks,
   ContinuationContext,
   GenerationProgress,
   KeywordExplainer,
@@ -743,6 +744,164 @@ followUps 必须是对当前分析的延伸，不要像另一个全新选题。`
   };
 };
 
+const trimmedVoiceName = (prompt: string) => prompt.replace(/^(我想看看|想看看|让|请|加入|邀请)/, '').replace(/(的看法|会怎么说|加入讨论|回应这个问题)[？?。]*$/, '').trim() || '新的思想声音';
+
+const outlineFromResult = (result: AnalysisResult, voicePlans: AnalysisOutline['voicePlans']): AnalysisOutline => ({
+  id: result.id,
+  createdAt: result.createdAt,
+  topic: result.topic,
+  philosophical_title: result.philosophical_title,
+  mode: result.mode,
+  modeLabel: result.modeLabel,
+  introduction: result.introduction,
+  questionFrame: result.questionFrame,
+  programStructure: result.programStructure,
+  routeMap: result.routeMap,
+  voicePlans,
+  seminarMatrix: result.seminarMatrix,
+  diagnosisFrame: result.diagnosisFrame,
+  thoughtExperiment: result.thoughtExperiment,
+  reasoning_trace: result.reasoning_trace,
+});
+
+const planAdditionalVoice = async (existingResult: AnalysisResult, userPrompt: string): Promise<AnalysisOutline['voicePlans'][number]> => {
+  const existingVoiceSummary = existingResult.voices
+    .map((voice) => `${voice.name}（${voice.kind}）：${voice.summaryForSynthesis || voice.stance || voice.oneLine}`)
+    .join('\n');
+  const existingIds = new Set(existingResult.voices.map((voice) => voice.id));
+  const fallbackPlan = {
+    id: makeId('voice'),
+    name: trimmedVoiceName(userPrompt),
+    kind: 'philosopher' as VoiceKind,
+    school: '',
+    role: '后来加入的思想声音',
+    coreConcept: '延展视角',
+    oneLine: `沿着“${userPrompt}”加入当前分析`,
+    stance: `回应用户希望补充的视角：${userPrompt}`,
+    diagnosis: '',
+    prescription: '',
+    thesis: '',
+    critique: '',
+  };
+  const raw = await callChatJson<any>([
+    {
+      role: 'system',
+      content: '你是 Sophia 的思想声音策展人。请把用户的延展请求规划成一个新的思想声音，不写正文，只输出 JSON。',
+    },
+    {
+      role: 'user',
+      content: `当前分析标题：${existingResult.philosophical_title}
+原始问题：${existingResult.topic}
+核心问题：${existingResult.questionFrame.bigQuestion}
+分析路径：${existingResult.modeLabel}
+已有思想声音：
+${existingVoiceSummary || '无'}
+已有核心分歧：
+${existingResult.tensions.map((tension) => `${tension.title}: ${tension.content}`).join('\n') || '无'}
+当前综合判断：${existingResult.conclusion.summary || '无'}
+用户希望加入的新声音：${userPrompt}
+
+请规划一个新的 voicePlan。要求：
+- 如果用户点名哲学家或思想家，例如“加缪会怎么说”，就以这个人物为新声音。
+- 如果用户点名流派、概念或立场，就选择合适的 kind。
+- 不要重复已有思想声音，除非用户明确要求同一声音的另一种版本。
+- 必须贴合当前问题，而不是泛泛介绍哲学史。
+
+输出 JSON：{
+  "voicePlan": {
+    "name":"哲学家/流派/概念/立场名",
+    "kind":"philosopher|school|concept|position|contemporary",
+    "school":"学派，可选",
+    "role":"它在当前分析中承担的角色",
+    "coreConcept":"核心概念",
+    "oneLine":"一句话观点",
+    "stance":"立场摘要",
+    "diagnosis":"如果适用，诊断",
+    "prescription":"如果适用，药方",
+    "thesis":"如果适用，主张",
+    "critique":"如果适用，会受到的批评"
+  }
+}`,
+    },
+  ], 1600).catch(() => ({ voicePlan: fallbackPlan }));
+
+  const [normalizedPlan] = normalizeVoicePlans([raw?.voicePlan || raw]);
+  const id = makeId('voice');
+  const voicePlan = normalizedPlan || fallbackPlan;
+  return {
+    ...voicePlan,
+    id: existingIds.has(voicePlan.id) ? id : (voicePlan.id || id),
+  };
+};
+
+export const appendThoughtVoice = async (
+  existingResult: AnalysisResult,
+  userPrompt: string,
+  callbacks: AppendVoiceCallbacks = {},
+): Promise<AnalysisResult> => {
+  const trimmedPrompt = userPrompt.trim();
+  if (!trimmedPrompt) return existingResult;
+
+  const voicePlan = await planAdditionalVoice(existingResult, trimmedPrompt);
+  const addedAt = new Date().toISOString();
+  const placeholder: ThoughtVoice = {
+    ...voicePlan,
+    argument: '',
+    summaryForSynthesis: '',
+    status: 'queued',
+    addedByUserPrompt: trimmedPrompt,
+    addedAt,
+  };
+  callbacks.onVoicePlanned?.(placeholder);
+
+  const outline = outlineFromResult(existingResult, [voicePlan]);
+  callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
+
+  try {
+    const voice = await generateVoiceEssay(
+      existingResult.topic,
+      outline,
+      voicePlan,
+      (delta, fullText) => callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText),
+      (message) => callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message),
+    );
+    const appendedVoice: ThoughtVoice = {
+      ...voice,
+      addedByUserPrompt: trimmedPrompt,
+      addedAt,
+      status: 'completed',
+    };
+    callbacks.onVoiceComplete?.(appendedVoice);
+
+    const voices = [...existingResult.voices, appendedVoice];
+    const synthesisVoices = voices.filter((item) => item.status !== 'failed' && item.summaryForSynthesis);
+    const synthesis = await generateSynthesis(existingResult.topic, outlineFromResult(existingResult, [voicePlan]), synthesisVoices);
+    callbacks.onSynthesis?.(synthesis);
+
+    return {
+      ...existingResult,
+      voices,
+      tensions: normalizeTensions(synthesis.tensions),
+      keywords: normalizeKeywords(synthesis.keywords),
+      followUps: normalizeFollowUps(synthesis.followUps),
+      conclusion: normalizeConclusion(synthesis.conclusion),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '生成失败';
+    const failedVoice: ThoughtVoice = {
+      ...placeholder,
+      status: 'failed',
+      error: message,
+    };
+    callbacks.onVoiceComplete?.(failedVoice);
+    callbacks.onError?.(message);
+    return {
+      ...existingResult,
+      voices: [...existingResult.voices, failedVoice],
+    };
+  }
+};
+
 export const createPartialResult = (outline: AnalysisOutline): AnalysisResult => ({
   id: outline.id,
   createdAt: outline.createdAt,
@@ -950,20 +1109,77 @@ ${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入
   return questions.length > 0 ? questions : [];
 };
 
-export const getReflectionFeedback = async (topic: string, userReflection: string): Promise<string> => {
+const truncateForReflection = (value: string | undefined, maxLength = 360) => {
+  const text = (value || '').replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+};
+
+const stripReplyMarkdown = (value: string) => value
+  .replace(/```(?:\w+)?\s*([\s\S]*?)```/g, '$1')
+  .replace(/\*\*([^*]+)\*\*/g, '$1')
+  .replace(/__([^_]+)__/g, '$1')
+  .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+  .replace(/^\s*[-*]\s+/gm, '')
+  .trim();
+
+const buildReflectionContext = (result: AnalysisResult) => {
+  const voices = result.voices
+    .filter((voice) => voice.status !== 'failed')
+    .map((voice, index) => [
+      `${index + 1}. ${voice.name}`,
+      `类型：${voice.kind}${voice.school ? ` / ${voice.school}` : ''}`,
+      `角色：${truncateForReflection(voice.role, 160)}`,
+      `核心概念：${truncateForReflection(voice.coreConcept, 160)}`,
+      `一句话：${truncateForReflection(voice.oneLine || voice.stance, 220)}`,
+      voice.thesis ? `主张：${truncateForReflection(voice.thesis, 220)}` : '',
+      voice.critique ? `批评：${truncateForReflection(voice.critique, 220)}` : '',
+      voice.summaryForSynthesis ? `综合摘要：${truncateForReflection(voice.summaryForSynthesis, 360)}` : '',
+      voice.argument ? `正文片段：${truncateForReflection(voice.argument, 420)}` : '',
+    ].filter(Boolean).join('\n'))
+    .join('\n\n');
+
+  const keywords = result.keywords
+    .map((keyword) => `${keyword.term}：${truncateForReflection(keyword.meaning, 220)}${keyword.importance ? `；重要性：${truncateForReflection(keyword.importance, 180)}` : ''}`)
+    .join('\n');
+
+  const tensions = result.tensions
+    .map((tension, index) => `${index + 1}. ${tension.title}：${truncateForReflection(tension.content, 320)}`)
+    .join('\n');
+
+  const routeMap = result.routeMap
+    .map((node, index) => `${index + 1}. ${node.title}：${truncateForReflection(node.plain, 220)}${node.tension ? `；张力：${truncateForReflection(node.tension, 180)}` : ''}`)
+    .join('\n');
+
+  return [
+    `标题：${result.philosophical_title}`,
+    `原始问题：${result.topic}`,
+    `核心问题：${result.questionFrame.bigQuestion}`,
+    `现实翻译：${result.questionFrame.plainTranslation}`,
+    result.introduction ? `导言：${truncateForReflection(result.introduction, 420)}` : '',
+    keywords ? `\n概念标记：\n${keywords}` : '',
+    routeMap ? `\n论证路线：\n${routeMap}` : '',
+    voices ? `\n思想声音：\n${voices}` : '',
+    tensions ? `\n主要分歧：\n${tensions}` : '',
+    result.conclusion.summary ? `\n暂时合流：${truncateForReflection(result.conclusion.summary, 520)}` : '',
+    result.conclusion.openQuestion ? `仍然悬着的问题：${truncateForReflection(result.conclusion.openQuestion, 260)}` : '',
+  ].filter(Boolean).join('\n');
+};
+
+export const getReflectionFeedback = async (result: AnalysisResult, userReflection: string): Promise<string> => {
   try {
-    return await callChatText([
+    const response = await callChatText([
       {
         role: 'system',
-        content: `你是 Sophia，一个哲学对话者。请用简体中文回应用户追问。要尖锐、鼓励、严谨，并连接到具体哲学立场；不要把它写成作文批改，而要像继续追问的对话。`,
+        content: `你是 Sophia，一个正在和用户讨论当前分析结果的哲学对话者。必须紧扣用户面前这份分析的具体内容回答，而不是凭外部常识泛泛解释。若用户点名某个声音、概念、分歧或卡片标题，要优先解释这个对象在当前分析里的含义。不要编造当前分析里没有的立场。输出纯文本，不使用 Markdown 标记：不要 **、不要标题符号、不要项目符号。语气要像对话：准确、清楚、能继续追问。`,
       },
       {
         role: 'user',
-        content: `分析主题：${topic}\n用户追问：${userReflection}\n\n请像在和用户继续对话一样回应：先指出这个追问真正卡住的概念，再给出 1-2 个可能的思想路径，最后反问一个更准确的下一问。300-600 字。`,
+        content: `当前分析上下文：\n${buildReflectionContext(result)}\n\n用户对 Sophia 说：${userReflection}\n\n请直接回应用户。若用户是在要求“换一种说法/更日常解释”，就先用日常语言解释其点名对象，再补一句它在整场分析中的作用，最后给一个更准确的追问方向。180-420 字。`,
       },
     ], 1200);
+    return stripReplyMarkdown(response);
   } catch (error) {
     console.error('Reflection feedback error:', error);
-    return '苏菲暂时无法回应，请稍后再试。';
+    return 'Sophia 暂时无法回应，请稍后再试。';
   }
 };

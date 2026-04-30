@@ -105,7 +105,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
 
   return (
     <div className={`transition-all duration-700 ease-in-out ${isDone ? 'opacity-80 py-4' : 'opacity-100 py-8'}`}>
-      <div className="max-w-3xl mx-auto bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-6 rounded-xl">
+      <div className="max-w-3xl mx-auto bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-4 md:p-6 rounded-xl">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5 border-b border-museum-100 pb-4">
           <div className="flex items-center space-x-3">
             {isDone ? <CheckCircle2 className="w-5 h-5 text-emerald-700" /> : <Loader2 className="w-5 h-5 animate-spin text-museum-800" />}
@@ -124,7 +124,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
         </div>
 
         <div className="mb-5">
-          <div className="flex justify-between gap-4 text-[10px] font-mono uppercase tracking-widest text-museum-400 mb-2">
+          <div className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-museum-400 mb-2 sm:flex-row sm:justify-between sm:gap-4">
             <span>{rotatingHint}</span>
             <span>{isDone ? '100%' : `约 ${percent}%`}</span>
           </div>
@@ -142,7 +142,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           <div>
             <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">思想声音</p>
             <p className="mt-1 font-serif text-lg text-museum-900">{total > 0 ? `${completed}/${total}` : '等待确定'}</p>
-            <p className="mt-1 truncate text-xs text-museum-500">{progress?.currentVoiceName ? `正在展开：${progress.currentVoiceName}` : '尚未进入长篇声音生成'}</p>
+            <p className="mt-1 text-xs text-museum-500 line-clamp-2">{progress?.currentVoiceName ? `正在展开：${progress.currentVoiceName}` : '尚未进入长篇声音生成'}</p>
           </div>
           <div>
             <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">接下来</p>
@@ -180,7 +180,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           <div className="mt-5 border-t border-museum-100 pt-4 space-y-2">
             <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">最新生成动态</p>
             {progress.messages.slice(-3).map((message, idx) => (
-              <p key={`${message}-${idx}`} className="text-sm font-mono text-museum-700 leading-relaxed">· {message}</p>
+              <p key={`${message}-${idx}`} className="text-sm text-museum-700 leading-relaxed">· {message}</p>
             ))}
           </div>
         ) : null}

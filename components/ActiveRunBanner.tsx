@@ -55,9 +55,9 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
               <p className="mb-0.5 text-[9px] font-mono uppercase tracking-[0.22em] text-museum-500 sm:text-[10px]">
                 {statusText} · {progressText}
               </p>
-              <p className="truncate font-serif text-sm leading-snug text-museum-900 sm:text-base">{title}</p>
+              <p className="line-clamp-2 font-serif text-sm leading-snug text-museum-900 sm:truncate sm:text-base">{title}</p>
               {currentWork && isRunning && (
-                <p className="mt-0.5 truncate text-xs text-museum-500">{currentWork}</p>
+                <p className="mt-0.5 line-clamp-2 text-xs text-museum-500 sm:truncate">{currentWork}</p>
               )}
             </div>
           </div>
