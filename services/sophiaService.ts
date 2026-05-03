@@ -355,6 +355,22 @@ export const generateThoughtVoiceAvatar = async (
   };
 };
 
+const parseSseResponse = (text: string): unknown => {
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith('data:')) continue;
+    const payload = trimmed.slice(5).trim();
+    if (payload === '[DONE]') continue;
+    try {
+      return JSON.parse(payload);
+    } catch {
+      // continue to next line
+    }
+  }
+  throw new Error('No valid JSON found in SSE response');
+};
+
 const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
   const cfg = getActiveConfig();
   const response = await fetchWithRetry(chatEndpoint(), {
@@ -365,6 +381,7 @@ const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; conten
       messages,
       temperature: cfg.options.temperature,
       max_tokens: maxTokens,
+      stream: false,
       response_format: { type: 'json_object' },
     }),
   }, { timeoutMs: 90000, label: 'chat-json' });
@@ -373,7 +390,13 @@ const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; conten
     throw new Error(await apiErrorMessage(response));
   }
 
-  const data = await response.json();
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    const text = await response.clone().text();
+    data = parseSseResponse(text);
+  }
   recordUsageFromResponse(data?.usage);
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('苏菲没有回应。API 返回数据格式异常。');
@@ -398,6 +421,7 @@ const callChatText = async (
         messages,
         temperature: cfg.options.temperature,
         max_tokens: maxTokens,
+        stream: false,
       }),
     }, { timeoutMs: 120000, label: 'chat-text' });
 
@@ -405,7 +429,13 @@ const callChatText = async (
       throw new Error(await apiErrorMessage(response));
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      const text = await response.clone().text();
+      data = parseSseResponse(text);
+    }
     recordUsageFromResponse(data?.usage);
     return data.choices?.[0]?.message?.content || '';
   }

@@ -88,7 +88,18 @@ export const reframeUserTopic = async (rawTopic: string): Promise<TopicReframeRe
       return EMPTY;
     }
 
-    const data = await response.json().catch(() => null);
+    const data = await response.json().catch(async () => {
+      const text = await response.clone().text();
+      const lines = text.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        try { return JSON.parse(payload); } catch { /* continue */ }
+      }
+      return null;
+    });
     const usage = buildUsage(data?.usage, 'reframe', cfg.apiModel);
     if (usage) recordUsage(usage);
 
