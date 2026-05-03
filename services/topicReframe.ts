@@ -11,6 +11,7 @@
 import { getActiveConfig } from './sophiaConfig';
 import { resolveTopicReframeSystemPrompt } from './prompts';
 import { buildUsage, recordUsage } from './tokenAccounting';
+import { parseModelJson } from './jsonResponse';
 
 export interface ReframeCandidate {
   title: string;
@@ -24,14 +25,7 @@ export interface TopicReframeResult {
 
 const EMPTY: TopicReframeResult = { shouldReframe: false, candidates: [] };
 
-const parseJsonContent = <T>(content: string): T => {
-  let body = content.trim();
-  if (body.startsWith('```')) {
-    const match = body.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) body = match[1].trim();
-  }
-  return JSON.parse(body) as T;
-};
+const parseJsonContent = <T>(content: string): T => parseModelJson<T>(content);
 
 const sanitizeCandidates = (raw: unknown): ReframeCandidate[] => {
   if (!Array.isArray(raw)) return [];

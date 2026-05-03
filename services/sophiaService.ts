@@ -36,6 +36,7 @@ import {
 } from './prompts';
 import { getActiveConfig } from './sophiaConfig';
 import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
+import { ModelJsonParseError, parseModelJson } from './jsonResponse';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
@@ -150,14 +151,7 @@ const shortRandomId = (): string => {
 
 const makeId = (prefix: string) => `${prefix}-${Date.now()}-${shortRandomId()}`;
 
-const parseJson = <T>(content: string): T => {
-  let jsonContent = content.trim();
-  if (jsonContent.startsWith('```')) {
-    const jsonMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) jsonContent = jsonMatch[1].trim();
-  }
-  return JSON.parse(jsonContent) as T;
-};
+const parseJson = <T>(content: string): T => parseModelJson<T>(content);
 
 const isTransientStatus = (status: number) => status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 
@@ -403,7 +397,17 @@ const parseSseResponse = (text: string): unknown => {
   throw new Error('No valid JSON found in SSE response');
 };
 
-const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
+// Appended as an extra system message on the second attempt of callChatJson when
+// the first attempt returned content we couldn't parse even after markdown recovery.
+// Some providers (Grok we've seen in practice) ignore response_format hints and wrap
+// the JSON in **bold** or prepend prose; this clause is a stronger lever.
+const STRICT_JSON_REINFORCEMENT = '严格规则：仅输出一个有效的 JSON 对象。不要使用 Markdown 代码围栏（``` 或 ```json），不要加粗体（**）或斜体（*、_）修饰，不要在 JSON 前后添加任何文字、注释或致谢。整个回复必须能被 JSON.parse 直接解析。';
+
+const callChatJsonOnce = async <T>(
+  messages: Array<{ role: 'system' | 'user'; content: string }>,
+  maxTokens: number,
+  attemptLabel: string,
+): Promise<T> => {
   const cfg = getActiveConfig();
   const response = await fetchWithRetry(chatEndpoint(), {
     method: 'POST',
@@ -416,7 +420,7 @@ const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; conten
       stream: false,
       response_format: { type: 'json_object' },
     }),
-  }, { timeoutMs: 90000, label: 'chat-json' });
+  }, { timeoutMs: 90000, label: attemptLabel });
 
   if (!response.ok) {
     throw new Error(await apiErrorMessage(response));
@@ -431,8 +435,34 @@ const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; conten
   }
   recordUsageFromResponse(data?.usage);
   const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('苏菲没有回应。API 返回数据格式异常。');
+  if (!content) {
+    throw new ModelJsonParseError('苏菲没有回应。API 返回数据格式异常。', '');
+  }
   return parseJson<T>(content);
+};
+
+const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
+  try {
+    return await callChatJsonOnce<T>(messages, maxTokens, 'chat-json');
+  } catch (error) {
+    if (!(error instanceof ModelJsonParseError)) throw error;
+    // First attempt couldn't be coaxed into valid JSON. Try once more with an extra
+    // system message that forbids markdown, then surface the upstream error for
+    // diagnosis if even that fails.
+    // eslint-disable-next-line no-console
+    console.warn('[sophia][chat-json] retrying with stricter prompt after parse failure:', error.message);
+    const reinforced = [...messages, { role: 'system' as const, content: STRICT_JSON_REINFORCEMENT }];
+    try {
+      return await callChatJsonOnce<T>(reinforced, maxTokens, 'chat-json-strict');
+    } catch (retryError) {
+      if (retryError instanceof ModelJsonParseError) {
+        throw new Error(
+          `${getActiveConfig().apiProvider} 模型连续两次返回了无法解析的 JSON。最近一次预览：${retryError.preview || '（空）'}`,
+        );
+      }
+      throw retryError;
+    }
+  }
 };
 
 const STREAM_IDLE_TIMEOUT_MS = 45000;
