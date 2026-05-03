@@ -4,6 +4,7 @@ import {
   AnalyzeCallbacks,
   AppendVoiceCallbacks,
   ContinuationContext,
+  GenerationLogEntry,
   GenerationProgress,
   KeywordExplainer,
   OpenConclusion,
@@ -12,44 +13,113 @@ import {
   TensionFocus,
   ThoughtVoice,
   ThoughtVoiceImageAvatar,
+  TokenUsage,
+  TokenUsageStage,
   VoiceKind,
   emptyConclusion,
 } from '../types';
+import {
+  HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
+  HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT,
+  MODE_LABELS,
+  NEGATIVE_AVATAR_PROMPT,
+  THOUGHT_VOICE_AVATAR_STYLE,
+  VALID_MODES,
+  VOICE_KIND_AVATAR_SUBJECT,
+  resolveOutlineSystemPrompt,
+  resolveSynthesisSystemPrompt,
+  resolveVoiceSystemPrompt,
+} from './prompts';
+import { getActiveConfig } from './sophiaConfig';
+import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
 
-const apiKey = process.env.SOPHIA_API_KEY || '';
-const apiBaseUrl = (process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1').replace(/\/$/, '');
-const apiModel = process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini';
-const avatarImageModel = process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite';
-const apiProvider = process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible';
-const avatarImageSize = process.env.SOPHIA_IMAGE_SIZE || '1024x1024';
-const avatarAspectHint = process.env.SOPHIA_IMAGE_ASPECT_HINT || 'portrait 1:1.2 aspect ratio';
-const API_URL = `${apiBaseUrl}/chat/completions`;
-const IMAGE_API_URL = `${apiBaseUrl}/images/generations`;
-const requestHeaders = () => ({
-  'Content-Type': 'application/json',
-  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-});
+export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
-export const THOUGHT_VOICE_AVATAR_STYLE = 'Sophia editorial portrait style: square museum-catalog avatar, warm ivory and charcoal palette, muted ink-wash texture, subtle paper grain, soft directional light, restrained philosophical atmosphere, elegant, non-cartoon, non-photorealistic, no text, no logos, no UI elements.';
+interface RunContext {
+  onLog?: (entry: GenerationLogEntry) => void;
+  onTokenUsage?: (usage: TokenUsage) => void;
+  stage: TokenUsageStage;
+  voiceId?: string;
+  voiceName?: string;
+}
 
-const HISTORICAL_PHILOSOPHER_AVATAR_STYLE = 'Sophia editorial portrait style: museum-catalog avatar, warm ivory and charcoal palette, muted ink-wash texture, subtle paper grain, soft directional light, restrained philosophical atmosphere, elegant, non-cartoon, editorial historical portrait realism, no text, no logos, no UI elements.';
+const runStack: RunContext[] = [];
 
-const MODE_LABELS: Record<ProgramMode, string> = {
-  progressive: '层层深入',
-  roundtable: '圆桌辩论',
-  genealogy: '历史谱系',
-  dilemma: '两难困境',
-  concept_archaeology: '概念考古',
-  thought_experiment: '思想实验',
-  school_seminar: '流派研讨会',
-  diagnosis_clinic: '哲学门诊',
-  thought_experiment_panel: '思想实验的几条出路',
-  custom: '自由编排',
+const currentRunContext = (): RunContext | null => runStack[runStack.length - 1] || null;
+
+const pushRunContext = (ctx: RunContext) => {
+  runStack.push(ctx);
+  return ctx;
 };
 
-const VALID_MODES = new Set(Object.keys(MODE_LABELS));
+const popRunContext = (ctx: RunContext) => {
+  const idx = runStack.lastIndexOf(ctx);
+  if (idx >= 0) runStack.splice(idx, 1);
+};
 
-const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const withStage = <T>(stage: TokenUsageStage, fn: () => Promise<T>, extra?: Pick<RunContext, 'voiceId' | 'voiceName'>): Promise<T> => {
+  const top = currentRunContext();
+  if (!top) return fn();
+  const previous: RunContext = { ...top };
+  top.stage = stage;
+  if (extra) {
+    top.voiceId = extra.voiceId;
+    top.voiceName = extra.voiceName;
+  }
+  return fn().finally(() => {
+    top.stage = previous.stage;
+    top.voiceId = previous.voiceId;
+    top.voiceName = previous.voiceName;
+  });
+};
+
+const emitLog = (entry: Omit<GenerationLogEntry, 'id' | 'ts'> & { id?: string; ts?: string }) => {
+  const ctx = currentRunContext();
+  if (!ctx?.onLog) return;
+  const id = entry.id || `log-${Date.now()}-${shortRandomId()}`;
+  ctx.onLog({
+    id,
+    ts: entry.ts || new Date().toISOString(),
+    level: entry.level,
+    stage: entry.stage,
+    voiceId: entry.voiceId ?? ctx.voiceId,
+    voiceName: entry.voiceName ?? ctx.voiceName,
+    message: entry.message,
+    tokens: entry.tokens,
+  });
+};
+
+const recordUsageFromResponse = (
+  raw: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined,
+  modelOverride?: string,
+): TokenUsage | null => {
+  const ctx = currentRunContext();
+  if (!ctx) return null;
+  const cfg = getActiveConfig();
+  const usage = buildUsage(raw, ctx.stage, modelOverride || cfg.apiModel, ctx.voiceId);
+  if (!usage) return null;
+  ctx.onTokenUsage?.(usage);
+  return usage;
+};
+
+const requestHeaders = () => {
+  const cfg = getActiveConfig();
+  return {
+    'Content-Type': 'application/json',
+    ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+  };
+};
+
+const chatEndpoint = () => `${getActiveConfig().apiBaseUrl}/chat/completions`;
+const imageEndpoint = () => `${getActiveConfig().apiBaseUrl}/images/generations`;
+
+const shortRandomId = (): string => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid.replace(/-/g, '').slice(0, 8);
+  return Math.random().toString(36).slice(2, 10);
+};
+
+const makeId = (prefix: string) => `${prefix}-${Date.now()}-${shortRandomId()}`;
 
 const parseJson = <T>(content: string): T => {
   let jsonContent = content.trim();
@@ -64,35 +134,140 @@ const isTransientStatus = (status: number) => status === 408 || status === 429 |
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isRetryableNetworkError = (error: unknown): boolean => {
+  if (!error) return false;
+  if (error instanceof Error) {
+    // AbortError: our timeout fired (caller signal handled separately)
+    if (error.name === 'AbortError') return true;
+    // Most browsers throw TypeError for DNS / TLS / offline / ECONNRESET
+    if (error.name === 'TypeError') return true;
+    if (/network|failed to fetch|load failed|fetch failed/i.test(error.message || '')) return true;
+  }
+  return false;
+};
+
+const computeBackoffMs = (attempt: number) => {
+  const base = 800 * Math.pow(2, attempt);
+  const jitter = Math.floor(Math.random() * 400);
+  return Math.min(base + jitter, 8000);
+};
+
+interface FetchWithRetryOptions {
+  /** Per-attempt request timeout (driven by AbortController). Default 60s. */
+  timeoutMs?: number;
+  /** Total attempts including the first. Default 4. */
+  maxAttempts?: number;
+  /** External cancel signal forwarded to fetch. */
+  signal?: AbortSignal;
+  /** Short label that goes into the warn log so different call sites are distinguishable. */
+  label?: string;
+}
+
+const fetchWithRetry = async (
+  input: RequestInfo,
+  init: RequestInit = {},
+  { timeoutMs = 60000, maxAttempts = 4, signal, label = 'sophia-fetch' }: FetchWithRetryOptions = {},
+): Promise<Response> => {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (signal?.aborted) throw new DOMException('aborted by caller', 'AbortError');
+
+    const controller = new AbortController();
+    const onCallerAbort = () => controller.abort(signal?.reason);
+    if (signal) signal.addEventListener('abort', onCallerAbort, { once: true });
+    const timeoutId = setTimeout(
+      () => controller.abort(new DOMException(`timeout after ${timeoutMs}ms`, 'AbortError')),
+      timeoutMs,
+    );
+
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onCallerAbort);
+
+      if (response.ok) return response;
+      const isLastAttempt = attempt === maxAttempts - 1;
+      if (!isTransientStatus(response.status) || isLastAttempt) return response;
+
+      // Transient HTTP: drain body so the connection can be reused, then back off.
+      try { await response.text(); } catch { /* body may already be closed */ }
+      const backoff = computeBackoffMs(attempt);
+      // eslint-disable-next-line no-console
+      console.warn(`[sophia][${label}] transient HTTP ${response.status} on attempt ${attempt + 1}/${maxAttempts}, retrying in ${backoff}ms`);
+      await wait(backoff);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onCallerAbort);
+      lastError = error;
+      const isLastAttempt = attempt === maxAttempts - 1;
+      // Caller cancellation always propagates.
+      if (signal?.aborted) throw error;
+      const retryable = isRetryableNetworkError(error);
+      if (!retryable || isLastAttempt) throw error;
+      const backoff = computeBackoffMs(attempt);
+      const elapsed = Date.now() - startedAt;
+      const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      // eslint-disable-next-line no-console
+      console.warn(`[sophia][${label}] network error on attempt ${attempt + 1}/${maxAttempts} after ${elapsed}ms (${reason}), retrying in ${backoff}ms`);
+      await wait(backoff);
+    }
+  }
+  throw lastError ?? new Error(`[sophia][${label}] retries exhausted`);
+};
+
 const apiErrorMessage = async (response: Response) => {
+  const cfg = getActiveConfig();
   const errorData = await response.json().catch(() => ({}));
-  return `${apiProvider} API 请求失败: ${response.status} - ${errorData.error?.message || '未知错误'}`;
+  const upstream = errorData?.error?.message || errorData?.message || '';
+  const code = errorData?.error?.code || '';
+  const status = response.status;
+
+  let summary = '';
+  if (status === 401) {
+    summary = 'API key 无效或已过期，请到设置页检查 / 更换 key。';
+  } else if (status === 403) {
+    summary = '当前 key 无权访问该模型，可能是账号未开通或被限制。';
+  } else if (status === 404) {
+    summary = '模型名错误或服务未上线。请到设置页检查 model 字段是否拼写正确。';
+  } else if (status === 408) {
+    summary = '上游响应超时，已自动重试仍失败。请稍后再试。';
+  } else if (status === 429) {
+    summary = '触发了配额或限流。请稍后重试或更换一个限额更高的 key / 模型。';
+  } else if (status >= 500 && status < 600) {
+    summary = '上游服务波动，已自动重试仍失败。可以稍后再试，或在设置页换一个 provider。';
+  } else if (status >= 400 && status < 500) {
+    summary = `请求被 ${cfg.apiProvider} 拒绝（${status}）。请检查请求参数或更换模型。`;
+  } else {
+    summary = `${cfg.apiProvider} API 请求失败（HTTP ${status}）。`;
+  }
+
+  const trail: string[] = [];
+  if (upstream) trail.push(upstream);
+  if (code && code !== upstream) trail.push(`code=${code}`);
+  return trail.length > 0 ? `${summary}（${trail.join(' · ')}）` : summary;
 };
 
 const callAvatarImage = async (prompt: string): Promise<string> => {
-  let response: Response | null = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    response = await fetch(IMAGE_API_URL, {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        model: avatarImageModel,
-        prompt,
-        n: 1,
-        size: avatarImageSize,
-        response_format: 'b64_json',
-      }),
-    });
+  const cfg = getActiveConfig();
+  const response = await fetchWithRetry(imageEndpoint(), {
+    method: 'POST',
+    headers: requestHeaders(),
+    body: JSON.stringify({
+      model: cfg.avatarImageModel,
+      prompt,
+      n: 1,
+      size: cfg.avatarImageSize,
+      response_format: 'b64_json',
+    }),
+  }, { timeoutMs: 120000, label: 'avatar-image' });
 
-    if (response.ok || !isTransientStatus(response.status) || attempt === 2) break;
-    await wait(800 * (attempt + 1));
-  }
-
-  if (!response?.ok) {
-    throw new Error(response ? await apiErrorMessage(response) : `${apiProvider} 图片接口请求失败: 未知错误`);
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response));
   }
 
   const data = await response.json().catch(() => ({} as any));
+  recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
   const item = data?.data?.[0];
   if (item?.b64_json) {
     return `data:image/png;base64,${item.b64_json}`;
@@ -100,26 +275,15 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
   if (typeof item?.url === 'string' && item.url) {
     return item.url;
   }
-  throw new Error(`${apiProvider} 图片接口未返回可用图像。`);
+  throw new Error(`${cfg.apiProvider} 图片接口未返回可用图像。`);
 };
-
-const VOICE_KIND_AVATAR_SUBJECT: Record<VoiceKind, string> = {
-  philosopher: 'a recognizable historical portrait interpretation when the voice name is a real philosopher; preserve the thinker\'s known facial structure, hair, clothing era, posture and intellectual temperament while keeping Sophia\'s restrained museum-catalog style.',
-  school: 'a fictional, representative thinker embodying the temperament of this school of thought; symbolic, archetypal, never a real person.',
-  concept: 'an allegorical personification of the concept, conveyed through gesture, light, posture and quiet symbolic background props; expressive but restrained.',
-  position: 'a fictional contemporary thinker holding this real-world stance; ordinary modern attire, museum-catalog framing, no celebrity likeness.',
-  contemporary: 'a fictional contemporary critic or observer; thoughtful expression, modern restrained attire, museum-catalog framing.',
-};
-
-const NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid celebrity photo likeness.';
-
-const HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid modern celebrity glamour photography.';
 
 export const buildThoughtVoiceAvatarPrompt = (
   topic: string,
   outline: Pick<AnalysisOutline, 'philosophical_title' | 'modeLabel'>,
   voicePlan: { name: string; kind: VoiceKind; school?: string; role: string; coreConcept: string; oneLine: string; stance: string },
 ): string => {
+  const cfg = getActiveConfig();
   const isHistoricalPhilosopher = voicePlan.kind === 'philosopher';
   const subject = VOICE_KIND_AVATAR_SUBJECT[voicePlan.kind] || VOICE_KIND_AVATAR_SUBJECT.philosopher;
   const schoolLine = voicePlan.school ? `\nSchool / tradition: ${voicePlan.school}` : '';
@@ -138,7 +302,7 @@ export const buildThoughtVoiceAvatarPrompt = (
     `User question being analyzed: ${topic}`,
     `Big question: ${outline.philosophical_title}`,
     `Analytical mode: ${outline.modeLabel}`,
-    `Composition: ${avatarAspectHint}, slightly taller-than-wide editorial portrait, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere. Avoid square crop; leave quiet vertical breathing room above and below the figure.`,
+    `Composition: ${cfg.avatarAspectHint}, slightly taller-than-wide editorial portrait, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere. Avoid square crop; leave quiet vertical breathing room above and below the figure.`,
     isHistoricalPhilosopher ? HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT : NEGATIVE_AVATAR_PROMPT,
   ].join('\n');
 };
@@ -154,7 +318,7 @@ export const generateThoughtVoiceAvatar = async (
     imageUrl,
     prompt,
     style: THOUGHT_VOICE_AVATAR_STYLE,
-    model: avatarImageModel,
+    model: getActiveConfig().avatarImageModel,
     alt: `${voicePlan.name} 的竖版思想声音头像`,
     generatedAt: new Date().toISOString(),
     subjectType: voicePlan.kind,
@@ -162,80 +326,76 @@ export const generateThoughtVoiceAvatar = async (
 };
 
 const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
-  let response: Response | null = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        model: apiModel,
-        messages,
-        temperature: 0.72,
-        max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-      }),
-    });
+  const cfg = getActiveConfig();
+  const response = await fetchWithRetry(chatEndpoint(), {
+    method: 'POST',
+    headers: requestHeaders(),
+    body: JSON.stringify({
+      model: cfg.apiModel,
+      messages,
+      temperature: cfg.options.temperature,
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+    }),
+  }, { timeoutMs: 90000, label: 'chat-json' });
 
-    if (response.ok || !isTransientStatus(response.status) || attempt === 2) break;
-    await wait(800 * (attempt + 1));
-  }
-
-  if (!response?.ok) {
-    throw new Error(response ? await apiErrorMessage(response) : `${apiProvider} API 请求失败: 未知错误`);
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response));
   }
 
   const data = await response.json();
+  recordUsageFromResponse(data?.usage);
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('苏菲没有回应。API 返回数据格式异常。');
   return parseJson<T>(content);
 };
+
+const STREAM_IDLE_TIMEOUT_MS = 45000;
+const STREAM_FALLBACK_MIN_CHARS = 200;
 
 const callChatText = async (
   messages: Array<{ role: 'system' | 'user'; content: string }>,
   maxTokens = 4096,
   onDelta?: (delta: string, fullText: string) => void,
 ): Promise<string> => {
+  const cfg = getActiveConfig();
   if (!onDelta) {
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await fetch(API_URL, {
-        method: 'POST',
-        headers: requestHeaders(),
-        body: JSON.stringify({
-          model: apiModel,
-          messages,
-          temperature: 0.72,
-          max_tokens: maxTokens,
-        }),
-      });
+    const response = await fetchWithRetry(chatEndpoint(), {
+      method: 'POST',
+      headers: requestHeaders(),
+      body: JSON.stringify({
+        model: cfg.apiModel,
+        messages,
+        temperature: cfg.options.temperature,
+        max_tokens: maxTokens,
+      }),
+    }, { timeoutMs: 120000, label: 'chat-text' });
 
-      if (response.ok || !isTransientStatus(response.status) || attempt === 2) break;
-      await wait(800 * (attempt + 1));
-    }
-
-    if (!response?.ok) {
-      throw new Error(response ? await apiErrorMessage(response) : `${apiProvider} API 请求失败: 未知错误`);
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response));
     }
 
     const data = await response.json();
+    recordUsageFromResponse(data?.usage);
     return data.choices?.[0]?.message?.content || '';
   }
 
-  const response = await fetch(API_URL, {
+  // Streaming path: connect with retry+timeout, then read body with per-chunk idle timeout.
+  const response = await fetchWithRetry(chatEndpoint(), {
     method: 'POST',
     headers: requestHeaders(),
     body: JSON.stringify({
-      model: apiModel,
+      model: cfg.apiModel,
       messages,
-      temperature: 0.72,
+      temperature: cfg.options.temperature,
       max_tokens: maxTokens,
       stream: true,
     }),
-  });
+  }, { timeoutMs: 60000, label: 'chat-text-stream-connect' });
 
   if (!response.ok || !response.body) {
     const text = await response.text().catch(() => '');
-    throw new Error(`${apiProvider} 流式请求失败: ${response.status} ${text}`);
+    throw new Error(`${cfg.apiProvider} 流式请求失败: ${response.status} ${text}`);
   }
 
   const reader = response.body.getReader();
@@ -243,32 +403,81 @@ const callChatText = async (
   let buffer = '';
   let fullText = '';
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+  // Idle timeout: if no chunk arrives for STREAM_IDLE_TIMEOUT_MS, abort the read.
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let idleAborted = false;
+  const armIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleAborted = true;
+      reader.cancel(new DOMException('stream idle timeout', 'AbortError')).catch(() => {});
+    }, STREAM_IDLE_TIMEOUT_MS);
+  };
+  const disarmIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data:')) continue;
-      const payload = trimmed.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(payload);
-        const delta = parsed.choices?.[0]?.delta?.content || '';
-        if (delta) {
-          fullText += delta;
-          onDelta(delta, fullText);
+  try {
+    armIdleTimer();
+    while (true) {
+      const { value, done } = await reader.read();
+      armIdleTimer();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(payload);
+          const delta = parsed.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullText += delta;
+            onDelta(delta, fullText);
+          }
+          // Some OpenAI-compatible providers emit a final chunk that contains a usage block.
+          if (parsed.usage) recordUsageFromResponse(parsed.usage);
+        } catch {
+          // Ignore malformed SSE keepalive chunks.
         }
-      } catch {
-        // Ignore malformed SSE keepalive chunks.
       }
     }
+    disarmIdleTimer();
+    return fullText;
+  } catch (error) {
+    disarmIdleTimer();
+    // If the stream broke early without producing meaningful content, fall back to a
+    // non-streaming retry so the user still gets something readable.
+    const reason = idleAborted
+      ? '流式响应空闲超时'
+      : error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    if (fullText.length < STREAM_FALLBACK_MIN_CHARS) {
+      // eslint-disable-next-line no-console
+      console.warn(`[sophia][chat-text-stream] dropped after ${fullText.length} chars (${reason}), falling back to non-streaming request`);
+      emitLog({
+        level: 'warn',
+        stage: 'voices',
+        message: `流式响应中断（${reason}），自动回退到非流式重试。`,
+      });
+      return callChatText(messages, maxTokens);
+    }
+    // Got a substantial partial: surface it instead of losing the work.
+    // eslint-disable-next-line no-console
+    console.warn(`[sophia][chat-text-stream] truncated at ${fullText.length} chars (${reason}); returning partial text`);
+    emitLog({
+      level: 'warn',
+      stage: 'voices',
+      message: `流式响应在第 ${fullText.length} 字处中断（${reason}），返回已生成的部分。`,
+    });
+    return fullText;
   }
-
-  return fullText;
 };
 
 const normalizeMode = (mode: string | undefined): ProgramMode => {
@@ -480,32 +689,6 @@ const normalizeConclusion = (value: unknown): OpenConclusion => {
   };
 };
 
-const outlineSystemPrompt = `
-你是 Sophia，一个中文哲学写作者、问题结构编辑和思想地图设计者。你的任务不是写百科词条，而是把用户的问题整理成一份可阅读、可展开的哲学分析页面。
-
-核心原则：
-- 保留长篇哲学家/流派论述作为结果页核心，但本请求只生成分析骨架，不写长文。
-- 先把用户困惑翻译成一个大问题，再选择合适的分析路径。
-- 不要固定三层“常识/理论/本体”。
-- 不要固定 4-5 位哲学家；按问题需要选择 2-5 个思想声音。
-- 思想声音可以是哲学家、流派、概念、现实立场或当代批评者。
-- 优先选择真正贴合问题的思想资源，不要默认康德、尼采、苏格拉底。
-- 语言要有可读性、画面感和概念张力，但不要使用“节目”“本期节目”等说法。
-
-可选分析路径：
-- progressive: 层层深入
-- roundtable: 圆桌辩论
-- genealogy: 历史谱系
-- dilemma: 两难困境
-- concept_archaeology: 概念考古
-- thought_experiment: 思想实验
-- school_seminar: 流派研讨会，适合“某某主义有道理吗”
-- diagnosis_clinic: 哲学门诊，适合“如何克服/摆脱/面对某种困境”
-- thought_experiment_panel: 思想实验的几条出路，适合怀疑论/认识论思想实验
-- custom: 自由编排
-
-输出只能是 JSON，不要 markdown。`;
-
 const formatContinuationContext = (context?: ContinuationContext) => {
   if (!context) return '';
   return `
@@ -522,7 +705,7 @@ const formatContinuationContext = (context?: ContinuationContext) => {
 const generateOutline = async (topic: string, continuationContext?: ContinuationContext): Promise<AnalysisOutline> => {
   const continuationText = formatContinuationContext(continuationContext);
   const raw = await callChatJson<any>([
-    { role: 'system', content: outlineSystemPrompt },
+    { role: 'system', content: resolveOutlineSystemPrompt() },
     {
       role: 'user',
       content: `为这个用户问题设计哲学分析骨架：${topic}${continuationText}
@@ -593,22 +776,6 @@ voicePlans 选择 2-5 个，必须足够贴题。不要生成 routeMap.nextQuest
   };
 };
 
-const voiceSystemPrompt = `
-你是 Sophia，一位中文哲学长文写作者。你要为一个哲学分析页面中的单个“思想声音”写一篇严谨、通俗、有阅读感的长篇论述。
-
-写作要求：
-- 简体中文。
-- 1800-2400 中文字，目标约 2000 中文字；必须接近一篇完整短论文的展开密度，低于 1600 字视为不合格。
-- 不要写成条目清单，主体用连贯段落。
-- 风格严谨、有比喻、有现实例子、有概念张力，但不要油腻。
-- 必须围绕用户问题，不要泛泛介绍哲学史。
-- 内部必须覆盖：理论根基、对问题的诊断/主张、对其他立场的批判、用户如果接受它要承担的判断压力。
-- 如果分析路径是哲学门诊，要明显写出“诊断”和“药方”。
-- 如果是流派研讨会，要讲清该流派的哲学前提、核心诉求、典型批评。
-- 如果是思想实验的几条出路，要讲清它如何回应思想实验，以及局限在哪里。
-- 不要使用“节目”“本期节目”等说法。
-`;
-
 const generateVoiceEssay = async (
   topic: string,
   outline: AnalysisOutline,
@@ -617,12 +784,20 @@ const generateVoiceEssay = async (
   onStep?: (message: string) => void,
 ): Promise<ThoughtVoice> => {
   onStep?.(`${voicePlan.name} 正在并行生成正文与思想头像...`);
-  const avatarPromise = generateThoughtVoiceAvatar(topic, outline, voicePlan).catch((error) => {
+  const avatarPromise = withStage(
+    'avatar',
+    () => generateThoughtVoiceAvatar(topic, outline, voicePlan),
+    { voiceId: voicePlan.id, voiceName: voicePlan.name },
+  ).then((avatar) => {
+    emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像已完成。` });
+    return avatar;
+  }).catch((error) => {
     console.warn(`[sophia] 思想声音头像生成失败：${voicePlan.name}`, error);
+    emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像生成失败，将使用占位。` });
     return undefined;
   });
   const argument = await callChatText([
-    { role: 'system', content: voiceSystemPrompt },
+    { role: 'system', content: resolveVoiceSystemPrompt() },
     {
       role: 'user',
       content: `用户问题：${topic}
@@ -646,7 +821,7 @@ const generateVoiceEssay = async (
 
 直接输出正文，不要 JSON，不要标题。`,
     },
-  ], 7000, onDelta);
+  ], getActiveConfig().options.voiceMaxTokens, onDelta);
 
   onStep?.(`${voicePlan.name} 正在提炼摘要与可被批评处...`);
   const summary = await callChatJson<{ summaryForSynthesis: string; quote?: string; challenges?: string[] }>([
@@ -715,7 +890,7 @@ const generateSynthesis = async (
   };
 
   const raw = await callChatJson<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>([
-    { role: 'system', content: '你是哲学分析编辑。基于已生成的思想声音摘要，生成最终综合判断。只输出 JSON。' },
+    { role: 'system', content: resolveSynthesisSystemPrompt() },
     {
       role: 'user',
       content: `用户问题：${topic}
@@ -726,13 +901,13 @@ ${voices.map((v) => `${v.name}: ${v.summaryForSynthesis}`).join('\n')}
 
 输出 JSON：
 {
-  "tensions": [{"id":"tension-1","title":"他们到底在争什么","content":"180-350字，解释核心分歧","relatedVoiceIds":["voice-id"]}],
+  "tensions": [{"id":"tension-1","title":"他们到底在争什么","content":"220-320字，解释这几个声音之间真正在争什么；必须是声音之间的真实分歧，不要逐个复述每个声音的立场","relatedVoiceIds":["voice-id"]}],
   "keywords": [{"id":"keyword-1","term":"关键词","meaning":"这个词是什么意思","importance":"它在这个问题里为什么重要"}],
   "followUps": [{"id":"follow-1","question":"承接当前分析的继续追问","reason":"说明它如何接着当前分歧、关键词或结论往下走"}],
   "conclusion": {"summary":"综合判断，400-700字","openQuestion":"仍然悬而未决的问题","realLifeReturn":"回到用户现实处境，200-350字"}
 }
 
-followUps 必须是对当前分析的延伸，不要像另一个全新选题。`,
+followUps 必须是对当前分析的延伸，不要像另一个全新选题。tensions 至少 2 条；如果声音之间没有真实分歧，要诚实指出"这几位在该问题上有共识、分歧出现在更细的环节"。`,
     },
   ], 3500).catch(() => fallback);
 
@@ -842,29 +1017,41 @@ export const appendThoughtVoice = async (
   const trimmedPrompt = userPrompt.trim();
   if (!trimmedPrompt) return existingResult;
 
-  const voicePlan = await planAdditionalVoice(existingResult, trimmedPrompt);
-  const addedAt = new Date().toISOString();
-  const placeholder: ThoughtVoice = {
-    ...voicePlan,
-    argument: '',
-    summaryForSynthesis: '',
-    status: 'queued',
-    addedByUserPrompt: trimmedPrompt,
-    addedAt,
-  };
-  callbacks.onVoicePlanned?.(placeholder);
-
-  const outline = outlineFromResult(existingResult, [voicePlan]);
-  callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
+  const ctx = pushRunContext({
+    stage: 'append',
+    onLog: callbacks.onLog,
+    onTokenUsage: callbacks.onTokenUsage,
+  });
+  emitLog({ level: 'info', stage: 'meta', message: `邀请新声音：${trimmedPrompt}` });
 
   try {
-    const voice = await generateVoiceEssay(
+    const voicePlan = await planAdditionalVoice(existingResult, trimmedPrompt);
+    emitLog({ level: 'info', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `已规划新声音：${voicePlan.name}（${voicePlan.kind}）。` });
+    const addedAt = new Date().toISOString();
+    const placeholder: ThoughtVoice = {
+      ...voicePlan,
+      argument: '',
+      summaryForSynthesis: '',
+      status: 'queued',
+      addedByUserPrompt: trimmedPrompt,
+      addedAt,
+    };
+    callbacks.onVoicePlanned?.(placeholder);
+
+    const outline = outlineFromResult(existingResult, [voicePlan]);
+    callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
+
+    const reportStep = (message: string) => {
+      callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message);
+      emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message });
+    };
+    const voice = await withStage('voices', () => generateVoiceEssay(
       existingResult.topic,
       outline,
       voicePlan,
       (delta, fullText) => callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText),
-      (message) => callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message),
-    );
+      reportStep,
+    ), { voiceId: voicePlan.id, voiceName: voicePlan.name }).catch(async () => withStage('voices', () => generateVoiceEssay(existingResult.topic, outline, voicePlan, undefined, reportStep), { voiceId: voicePlan.id, voiceName: voicePlan.name }));
     const appendedVoice: ThoughtVoice = {
       ...voice,
       addedByUserPrompt: trimmedPrompt,
@@ -872,11 +1059,13 @@ export const appendThoughtVoice = async (
       status: 'completed',
     };
     callbacks.onVoiceComplete?.(appendedVoice);
+    emitLog({ level: 'info', stage: 'voices', voiceId: appendedVoice.id, voiceName: appendedVoice.name, message: `${appendedVoice.name} 已加入分析（${appendedVoice.argument.length} 字），正在重算分歧与综合判断...` });
 
     const voices = [...existingResult.voices, appendedVoice];
     const synthesisVoices = voices.filter((item) => item.status !== 'failed' && item.summaryForSynthesis);
-    const synthesis = await generateSynthesis(existingResult.topic, outlineFromResult(existingResult, [voicePlan]), synthesisVoices);
+    const synthesis = await withStage('synthesis', () => generateSynthesis(existingResult.topic, outlineFromResult(existingResult, [voicePlan]), synthesisVoices));
     callbacks.onSynthesis?.(synthesis);
+    emitLog({ level: 'info', stage: 'synthesis', message: '综合判断已重新整理。' });
 
     return {
       ...existingResult,
@@ -889,16 +1078,131 @@ export const appendThoughtVoice = async (
   } catch (error) {
     const message = error instanceof Error ? error.message : '生成失败';
     const failedVoice: ThoughtVoice = {
-      ...placeholder,
+      argument: '',
+      summaryForSynthesis: '',
+      id: makeId('voice'),
+      name: trimmedVoiceName(trimmedPrompt),
+      kind: 'philosopher',
+      role: '后来加入的思想声音',
+      coreConcept: '延展视角',
+      oneLine: trimmedPrompt,
+      stance: trimmedPrompt,
       status: 'failed',
       error: message,
+      addedByUserPrompt: trimmedPrompt,
     };
     callbacks.onVoiceComplete?.(failedVoice);
     callbacks.onError?.(message);
+    emitLog({ level: 'error', stage: 'voices', message: `新声音生成失败：${message}` });
     return {
       ...existingResult,
       voices: [...existingResult.voices, failedVoice],
     };
+  } finally {
+    popRunContext(ctx);
+  }
+};
+
+export const regenerateThoughtVoice = async (
+  existingResult: AnalysisResult,
+  voiceId: string,
+  callbacks: AppendVoiceCallbacks = {},
+): Promise<AnalysisResult> => {
+  const failedVoice = existingResult.voices.find((voice) => voice.id === voiceId);
+  if (!failedVoice) {
+    const message = '找不到要重新生成的思想声音。';
+    callbacks.onError?.(message);
+    throw new Error(message);
+  }
+
+  const voicePlan: AnalysisOutline['voicePlans'][number] = {
+    id: failedVoice.id,
+    name: failedVoice.name,
+    kind: failedVoice.kind,
+    school: failedVoice.school,
+    role: failedVoice.role,
+    coreConcept: failedVoice.coreConcept,
+    oneLine: failedVoice.oneLine,
+    stance: failedVoice.stance,
+    diagnosis: failedVoice.diagnosis,
+    prescription: failedVoice.prescription,
+    thesis: failedVoice.thesis,
+    critique: failedVoice.critique,
+  };
+  const outline = outlineFromResult(existingResult, [voicePlan]);
+
+  const ctx = pushRunContext({
+    stage: 'voices',
+    voiceId: voicePlan.id,
+    voiceName: voicePlan.name,
+    onLog: callbacks.onLog,
+    onTokenUsage: callbacks.onTokenUsage,
+  });
+  callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
+  emitLog({ level: 'info', stage: 'voices', message: `正在重新生成 ${voicePlan.name}...` });
+
+  const reportStep = (message: string) => {
+    callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message);
+    emitLog({ level: 'detail', stage: 'voices', message });
+  };
+
+  try {
+    const voice = await generateVoiceEssay(
+      existingResult.topic,
+      outline,
+      voicePlan,
+      (delta, fullText) => callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText),
+      reportStep,
+    ).catch(async () => generateVoiceEssay(existingResult.topic, outline, voicePlan, undefined, reportStep));
+
+    const refreshed: ThoughtVoice = {
+      ...voice,
+      addedByUserPrompt: failedVoice.addedByUserPrompt,
+      addedAt: failedVoice.addedAt,
+      status: 'completed',
+      error: undefined,
+    };
+    callbacks.onVoiceComplete?.(refreshed);
+    emitLog({ level: 'info', stage: 'voices', message: `${voicePlan.name} 重新生成完成（${refreshed.argument.length} 字）。` });
+
+    const voices = existingResult.voices.map((v) => v.id === voiceId ? refreshed : v);
+    const synthesisVoices = voices.filter((v) => v.status !== 'failed' && v.summaryForSynthesis);
+    let synthesis: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'> | null = null;
+    try {
+      synthesis = await withStage('synthesis', () => generateSynthesis(existingResult.topic, outline, synthesisVoices));
+      callbacks.onSynthesis?.(synthesis);
+    } catch (synthesisError) {
+      // eslint-disable-next-line no-console
+      console.warn('[sophia][regenerate] synthesis after retry failed; keeping previous tensions/keywords/conclusion:', synthesisError);
+      emitLog({ level: 'warn', stage: 'synthesis', message: '重新生成后整理分歧失败，保留上一份分歧与综合判断。' });
+    }
+
+    return {
+      ...existingResult,
+      voices,
+      tensions: synthesis ? normalizeTensions(synthesis.tensions) : existingResult.tensions,
+      keywords: synthesis ? normalizeKeywords(synthesis.keywords) : existingResult.keywords,
+      followUps: synthesis ? normalizeFollowUps(synthesis.followUps) : existingResult.followUps,
+      conclusion: synthesis ? normalizeConclusion(synthesis.conclusion) : existingResult.conclusion,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '重新生成失败';
+    const stillFailed: ThoughtVoice = {
+      ...failedVoice,
+      argument: '',
+      summaryForSynthesis: '',
+      status: 'failed',
+      error: message,
+    };
+    callbacks.onVoiceComplete?.(stillFailed);
+    callbacks.onError?.(message);
+    emitLog({ level: 'error', stage: 'voices', message: `${voicePlan.name} 重新生成失败：${message}` });
+    return {
+      ...existingResult,
+      voices: existingResult.voices.map((v) => v.id === voiceId ? stillFailed : v),
+    };
+  } finally {
+    popRunContext(ctx);
   }
 };
 
@@ -955,8 +1259,18 @@ export const analyzeTopic = async (
   continuationContext?: ContinuationContext,
 ): Promise<AnalysisResult> => {
   const report = (progress: GenerationProgress) => callbacks.onProgress?.(progress);
+  const tokenUsage: TokenUsage[] = [];
+  const ctx = pushRunContext({
+    stage: 'outline',
+    onLog: callbacks.onLog,
+    onTokenUsage: (usage) => {
+      tokenUsage.push(usage);
+      callbacks.onTokenUsage?.(usage);
+    },
+  });
 
   try {
+    emitLog({ level: 'info', stage: 'outline', message: continuationContext ? '正在沿着上一份分析继续展开思想地图...' : '正在把问题整理成一张思想地图...' });
     report({
       stage: 'outline',
       totalVoices: 0,
@@ -965,8 +1279,10 @@ export const analyzeTopic = async (
     });
     const outline = await generateOutline(userTopic, continuationContext);
     callbacks.onOutline?.(outline);
+    emitLog({ level: 'info', stage: 'outline', message: `问题图谱已成形 · 分析路径：${outline.modeLabel}（计划 ${outline.voicePlans.length} 位思想声音）。` });
 
     let result = createPartialResult(outline);
+    ctx.stage = 'route';
     report({
       stage: 'route',
       modeLabel: outline.modeLabel,
@@ -974,12 +1290,15 @@ export const analyzeTopic = async (
       completedVoices: 0,
       messages: [`已形成分析路径：${outline.modeLabel}`, '正在补全论证路线图...'],
     });
+    emitLog({ level: 'info', stage: 'route', message: '正在补全论证路线图...' });
 
     const routeMap = await generateRouteDetails(userTopic, outline);
     result = { ...result, routeMap };
     callbacks.onRouteMap?.(routeMap);
+    emitLog({ level: 'info', stage: 'route', message: `已生成 ${routeMap.length} 个路线节点。` });
 
     const voices: ThoughtVoice[] = [];
+    ctx.stage = 'voices';
     report({
       stage: 'voices',
       modeLabel: outline.modeLabel,
@@ -987,9 +1306,11 @@ export const analyzeTopic = async (
       completedVoices: 0,
       messages: [`正在生成 ${outline.voicePlans.length} 个长篇思想声音...`],
     });
+    emitLog({ level: 'info', stage: 'voices', message: `准备并发生成 ${outline.voicePlans.length} 个思想声音（并发数 ${getActiveConfig().options.voiceConcurrency}）。` });
 
-    const generatedVoices = await runWithConcurrency(outline.voicePlans, 3, async (voicePlan) => {
+    const generatedVoices = await runWithConcurrency(outline.voicePlans, getActiveConfig().options.voiceConcurrency, async (voicePlan) => {
       callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
+      emitLog({ level: 'info', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 启动。` });
       report({
         stage: 'voices',
         modeLabel: outline.modeLabel,
@@ -1002,6 +1323,7 @@ export const analyzeTopic = async (
       try {
         const reportVoiceStep = (message: string) => {
           callbacks.onVoiceStep?.(voicePlan.id, voicePlan.name, message);
+          emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message });
           report({
             stage: 'voices',
             modeLabel: outline.modeLabel,
@@ -1011,8 +1333,14 @@ export const analyzeTopic = async (
             messages: [message],
           });
         };
-        const voice = await generateVoiceEssay(userTopic, outline, voicePlan, (delta, fullText) => {
+        let lastStreamLogTs = 0;
+        const voice = await withStage('voices', () => generateVoiceEssay(userTopic, outline, voicePlan, (delta, fullText) => {
           callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText);
+          const now = Date.now();
+          if (now - lastStreamLogTs >= 3000) {
+            lastStreamLogTs = now;
+            emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 正文流式输出：${fullText.length} 字。` });
+          }
           report({
             stage: 'voices',
             modeLabel: outline.modeLabel,
@@ -1022,9 +1350,16 @@ export const analyzeTopic = async (
             streamedChars: fullText.length,
             messages: [`${voicePlan.name} 正在生成长篇论述...`],
           });
-        }, reportVoiceStep).catch(async () => generateVoiceEssay(userTopic, outline, voicePlan, undefined, reportVoiceStep));
+        }, reportVoiceStep), { voiceId: voicePlan.id, voiceName: voicePlan.name }).catch(async () => withStage('voices', () => generateVoiceEssay(userTopic, outline, voicePlan, undefined, reportVoiceStep), { voiceId: voicePlan.id, voiceName: voicePlan.name }));
         voices.push(voice);
         callbacks.onVoiceComplete?.(voice);
+        emitLog({
+          level: 'info',
+          stage: 'voices',
+          voiceId: voicePlan.id,
+          voiceName: voicePlan.name,
+          message: `${voicePlan.name} 已完成（${voice.argument.length} 字）。${voice.avatar ? '' : '思想头像未生成，使用占位。'}`,
+        });
         report({
           stage: 'voices',
           modeLabel: outline.modeLabel,
@@ -1035,19 +1370,22 @@ export const analyzeTopic = async (
         });
         return voice;
       } catch (error) {
+        const message = error instanceof Error ? error.message : '生成失败';
         const failed: ThoughtVoice = {
           ...voicePlan,
           argument: '',
           summaryForSynthesis: '',
           status: 'failed',
-          error: error instanceof Error ? error.message : '生成失败',
+          error: message,
         };
         callbacks.onVoiceComplete?.(failed);
+        emitLog({ level: 'error', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 失败：${message}` });
         return failed;
       }
     });
 
     const completedVoices = generatedVoices.filter((voice) => voice.status === 'completed');
+    ctx.stage = 'synthesis';
     report({
       stage: 'synthesis',
       modeLabel: outline.modeLabel,
@@ -1055,9 +1393,12 @@ export const analyzeTopic = async (
       completedVoices: completedVoices.length,
       messages: ['正在生成分歧、关键词和综合判断...'],
     });
+    emitLog({ level: 'info', stage: 'synthesis', message: `所有思想声音已收束（${completedVoices.length}/${outline.voicePlans.length} 完成），正在生成分歧、关键词与综合判断...` });
     const synthesis = await generateSynthesis(userTopic, outline, completedVoices);
     callbacks.onSynthesis?.(synthesis);
+    emitLog({ level: 'info', stage: 'synthesis', message: `综合判断已完成（${synthesis.tensions.length} 条分歧 / ${synthesis.keywords.length} 个关键词 / ${synthesis.followUps.length} 条延伸追问）。` });
 
+    const totalTokens = tokenUsage.reduce((sum, entry) => sum + entry.totalTokens, 0);
     result = {
       ...result,
       voices: result.voices.map((placeholder) => generatedVoices.find((voice) => voice.id === placeholder.id) || placeholder),
@@ -1065,8 +1406,10 @@ export const analyzeTopic = async (
       keywords: normalizeKeywords(synthesis.keywords),
       followUps: normalizeFollowUps(synthesis.followUps),
       conclusion: normalizeConclusion(synthesis.conclusion),
+      metadata: { tokenUsage, totalTokens },
     };
 
+    ctx.stage = 'done';
     report({
       stage: 'done',
       modeLabel: outline.modeLabel,
@@ -1074,25 +1417,34 @@ export const analyzeTopic = async (
       completedVoices: completedVoices.length,
       messages: ['这份哲学分析已生成完成。'],
     });
+    emitLog({ level: 'info', stage: 'done', message: `整份分析已生成完成（累计 ${totalTokens} tokens）。` });
 
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : '发生了未知错误';
     callbacks.onError?.(message);
     report({ stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] });
+    emitLog({ level: 'error', stage: 'error', message: `生成中断：${message}` });
     throw error;
+  } finally {
+    popRunContext(ctx);
   }
 };
 
 export const generateQuestionSuggestions = async (seedTopic = ''): Promise<string[]> => {
-  const raw = await callChatJson<{ questions: string[] }>([
-    {
-      role: 'system',
-      content: '你是 Sophia 的首页问题策展人。请生成适合被哲学分析器展开的中文问题。只输出 JSON。',
-    },
-    {
-      role: 'user',
-      content: `请生成 5 个适合首页展示的哲学问题。
+  const ctx = pushRunContext({
+    stage: 'suggestion',
+    onTokenUsage: (usage) => recordUsageStandalone(usage),
+  });
+  try {
+    const raw = await callChatJson<{ questions: string[] }>([
+      {
+        role: 'system',
+        content: '你是 Sophia 的首页问题策展人。请生成适合被哲学分析器展开的中文问题。只输出 JSON。',
+      },
+      {
+        role: 'user',
+        content: `请生成 5 个适合首页展示的哲学问题。
 ${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入具体兴趣，请覆盖生活焦虑、伦理困境、认识论、社会议题和存在问题。'}
 
 要求：
@@ -1102,11 +1454,14 @@ ${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入
 - 不要输出解释。
 
 输出 JSON：{"questions":["问题1？","问题2？","问题3？","问题4？","问题5？"]}`,
-    },
-  ], 900);
+      },
+    ], 900);
 
-  const questions = normalizeQuestionSuggestions(raw.questions);
-  return questions.length > 0 ? questions : [];
+    const questions = normalizeQuestionSuggestions(raw.questions);
+    return questions.length > 0 ? questions : [];
+  } finally {
+    popRunContext(ctx);
+  }
 };
 
 const truncateForReflection = (value: string | undefined, maxLength = 360) => {
@@ -1166,6 +1521,10 @@ const buildReflectionContext = (result: AnalysisResult) => {
 };
 
 export const getReflectionFeedback = async (result: AnalysisResult, userReflection: string): Promise<string> => {
+  const ctx = pushRunContext({
+    stage: 'reflection',
+    onTokenUsage: (usage) => recordUsageStandalone(usage),
+  });
   try {
     const response = await callChatText([
       {
@@ -1174,12 +1533,14 @@ export const getReflectionFeedback = async (result: AnalysisResult, userReflecti
       },
       {
         role: 'user',
-        content: `当前分析上下文：\n${buildReflectionContext(result)}\n\n用户对 Sophia 说：${userReflection}\n\n请直接回应用户。若用户是在要求“换一种说法/更日常解释”，就先用日常语言解释其点名对象，再补一句它在整场分析中的作用，最后给一个更准确的追问方向。180-420 字。`,
+        content: `当前分析上下文：\n${buildReflectionContext(result)}\n\n用户对 Sophia 说：${userReflection}\n\n请直接回应用户。若用户是在要求”换一种说法/更日常解释”，就先用日常语言解释其点名对象，再补一句它在整场分析中的作用，最后给一个更准确的追问方向。180-420 字。`,
       },
     ], 1200);
     return stripReplyMarkdown(response);
   } catch (error) {
     console.error('Reflection feedback error:', error);
     return 'Sophia 暂时无法回应，请稍后再试。';
+  } finally {
+    popRunContext(ctx);
   }
 };

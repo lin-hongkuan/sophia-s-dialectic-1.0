@@ -152,6 +152,31 @@ export interface AnalysisResult {
   thoughtExperiment?: ThoughtExperimentFrame;
   conclusion: OpenConclusion;
   reasoning_trace?: string[];
+  metadata?: AnalysisMetadata;
+}
+
+export type TokenUsageStage =
+  | GenerationProgress['stage']
+  | 'reframe'
+  | 'append'
+  | 'reflection'
+  | 'suggestion'
+  | 'avatar';
+
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  model: string;
+  stage: TokenUsageStage;
+  ts: string;
+  /** Optional voice id when the call was a per-voice generation. */
+  voiceId?: string;
+}
+
+export interface AnalysisMetadata {
+  tokenUsage?: TokenUsage[];
+  totalTokens?: number;
 }
 
 export interface AnalysisOutline {
@@ -195,6 +220,18 @@ export interface GenerationProgress {
   messages: string[];
 }
 
+export interface GenerationLogEntry {
+  id: string;
+  ts: string;
+  level: 'info' | 'detail' | 'warn' | 'error';
+  stage: GenerationProgress['stage'] | 'meta' | 'reframe';
+  voiceId?: string;
+  voiceName?: string;
+  message: string;
+  /** Optional inline token usage for this step, surfaced by the log panel. */
+  tokens?: { prompt: number; completion: number; total: number };
+}
+
 export interface AnalyzeCallbacks {
   onProgress?: (progress: GenerationProgress) => void;
   onOutline?: (outline: AnalysisOutline) => void;
@@ -205,6 +242,10 @@ export interface AnalyzeCallbacks {
   onVoiceComplete?: (voice: ThoughtVoice) => void;
   onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
   onError?: (message: string) => void;
+  /** Each emit lands as a row in the GenerationLogPanel. */
+  onLog?: (entry: GenerationLogEntry) => void;
+  /** Per-network-call token usage, accumulated by the orchestrator. */
+  onTokenUsage?: (usage: TokenUsage) => void;
 }
 
 export interface AppendVoiceCallbacks {
@@ -215,6 +256,8 @@ export interface AppendVoiceCallbacks {
   onVoiceComplete?: (voice: ThoughtVoice) => void;
   onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
   onError?: (message: string) => void;
+  onLog?: (entry: GenerationLogEntry) => void;
+  onTokenUsage?: (usage: TokenUsage) => void;
 }
 
 export interface ContinuationContext {
@@ -237,6 +280,7 @@ export interface ActiveAnalysisRun {
   progress: GenerationProgress | null;
   error: string | null;
   isPresetRegeneration?: boolean;
+  log: GenerationLogEntry[];
 }
 
 export interface HistoryEntry {

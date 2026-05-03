@@ -46,6 +46,29 @@ export default defineConfig(({ mode }) => {
       proxy: sophiaApiProxy,
     },
     plugins: [react()],
+    build: {
+      target: 'es2020',
+      sourcemap: false,
+      // Don't emit a <link rel="modulepreload"> for the lazy three.js chunk —
+      // we want it to load only after the home page becomes interactive (via
+      // requestIdleCallback inside DynamicBackground).
+      modulePreload: {
+        resolveDependencies: (_filename, deps) => deps.filter((dep) => !/(?:^|\/)three-bg-/.test(dep) && !/(?:^|\/)BackgroundScene-/.test(dep)),
+      },
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('three') || id.includes('@react-three')) return 'three-bg';
+            if (id.includes('react-dom')) return 'react-dom';
+            if (id.includes('react') || id.includes('scheduler')) return 'react';
+            if (id.includes('lucide-react')) return 'icons';
+            if (id.includes('@fontsource')) return 'fonts';
+            return undefined;
+          },
+        },
+      },
+    },
     define: {
       'process.env.SOPHIA_API_KEY': JSON.stringify(useLocalApiProxy ? '' : sophiaApiKey),
       'process.env.SOPHIA_API_BASE_URL': JSON.stringify(useLocalApiProxy ? sophiaApiProxyPath : sophiaApiBaseUrl),
@@ -55,6 +78,9 @@ export default defineConfig(({ mode }) => {
       'process.env.SOPHIA_IMAGE_ASPECT_HINT': JSON.stringify(sophiaImageAspectHint),
       'process.env.SOPHIA_API_PROVIDER': JSON.stringify(sophiaApiProvider),
       'process.env.SOPHIA_API_CONFIGURED': JSON.stringify(sophiaApiKey ? 'true' : 'false'),
+      'process.env.SOPHIA_PRESET_GPT_MODEL': JSON.stringify(env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_PRESET_GPT_MODEL || sophiaApiModel),
+      'process.env.SOPHIA_PRESET_MIMO_MODEL': JSON.stringify(env.SOPHIA_PRESET_MIMO_MODEL || process.env.SOPHIA_PRESET_MIMO_MODEL || ''),
+      'process.env.SOPHIA_PRESET_GROK_MODEL': JSON.stringify(env.SOPHIA_PRESET_GROK_MODEL || process.env.SOPHIA_PRESET_GROK_MODEL || ''),
     },
     resolve: {
       alias: {

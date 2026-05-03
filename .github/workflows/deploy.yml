@@ -41,6 +41,9 @@ jobs:
           SOPHIA_API_MODEL: ${{ vars.SOPHIA_API_MODEL || 'gpt-5.4-mini' }}
           SOPHIA_IMAGE_MODEL: ${{ vars.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite' }}
           SOPHIA_API_PROVIDER: ${{ vars.SOPHIA_API_PROVIDER || 'OpenAI-compatible' }}
+          SOPHIA_PRESET_GPT_MODEL: ${{ vars.SOPHIA_PRESET_GPT_MODEL }}
+          SOPHIA_PRESET_MIMO_MODEL: ${{ vars.SOPHIA_PRESET_MIMO_MODEL }}
+          SOPHIA_PRESET_GROK_MODEL: ${{ vars.SOPHIA_PRESET_GROK_MODEL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
