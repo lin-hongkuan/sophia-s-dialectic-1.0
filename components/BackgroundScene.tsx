@@ -31,6 +31,27 @@ const CITY_HDR_URL = '/hdri/potsdamer_platz_1k.hdr';
 // of the home page hero text (mirrors the original effect 1:1).
 const FRONT_CLIPPING_PLANE = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
+// Shared GL options: low-power preference + tolerance for weak GPUs reduces context-loss churn,
+// especially in dev (StrictMode double-mounts each Canvas) and on integrated GPUs.
+const GL_OPTIONS = {
+  antialias: true,
+  alpha: true,
+  powerPreference: 'low-power' as const,
+  failIfMajorPerformanceCaveat: false,
+  preserveDrawingBuffer: false,
+};
+
+// Three.js itself calls preventDefault on contextlost so the browser is allowed to restore the
+// context, but it still prints "THREE.WebGLRenderer: Context Lost." once per loss. Adding our
+// own listener lets us also catch contextcreationerror (which three doesn't log) and gives us
+// a hook for future restore-time work.
+const attachContextHandlers = (gl: THREE.WebGLRenderer) => {
+  const canvas = gl.domElement;
+  const onLost = (event: Event) => event.preventDefault();
+  canvas.addEventListener('webglcontextlost', onLost, false);
+  canvas.addEventListener('webglcontextcreationerror', onLost, false);
+};
+
 const ResponsiveCamera = () => {
   const { camera, size } = useThree();
 
@@ -118,7 +139,13 @@ const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = 
   return (
     <>
       <div className="fixed inset-0 z-0 opacity-30 pointer-events-none">
-        <Canvas camera={{ position: [0, 0, 6], fov: 45 }} frameloop={frameloop} style={{ pointerEvents: 'none' }}>
+        <Canvas
+          camera={{ position: [0, 0, 6], fov: 45 }}
+          frameloop={frameloop}
+          gl={GL_OPTIONS}
+          style={{ pointerEvents: 'none' }}
+          onCreated={({ gl }) => attachContextHandlers(gl)}
+        >
           <ResponsiveCamera />
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
@@ -143,11 +170,12 @@ const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = 
         <div className="fixed inset-0 z-20 opacity-30 pointer-events-none">
           <Canvas
             camera={{ position: [0, 0, 6], fov: 45 }}
-            gl={{ alpha: true, antialias: true }}
+            gl={GL_OPTIONS}
             frameloop={frameloop}
             style={{ pointerEvents: 'none' }}
             onCreated={({ gl }) => {
               gl.localClippingEnabled = true;
+              attachContextHandlers(gl);
             }}
           >
             <ResponsiveCamera />
