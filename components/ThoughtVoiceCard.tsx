@@ -239,7 +239,12 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
   }, [hasArgument, previewHeight]);
 
   const isCollapsible = contentHeight > previewHeight + 40;
-  const visibleContentHeight = isExpanded || !isCollapsible ? contentHeight : previewHeight;
+  // While text is actively streaming in we don't lock the wrapper to a measured height or animate
+  // it: ResizeObserver fires every ~120ms as new chunks land, and a 700ms height tween chasing
+  // that moving target causes the card (and everything below it) to oscillate up and down.
+  // Once status flips to 'completed' the height-tween + collapsibility UI takes over.
+  const isStreaming = isGenerating && hasArgument;
+  const visibleContentHeight = isStreaming ? contentHeight : (isExpanded || !isCollapsible ? contentHeight : previewHeight);
 
   const toggleExpanded = () => setIsExpanded((current) => !current);
 
@@ -392,7 +397,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
         {hasArgument && (
           <div className="relative border-0 bg-white/55 shadow-none md:border md:border-museum-100/90 md:bg-white/42 md:backdrop-blur-[2px] md:shadow-[inset_0_1px_0_rgba(255,255,255,0.74)]">
             <div
-              className="relative overflow-hidden transition-[height] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              className={`relative overflow-hidden ${isStreaming ? '' : 'transition-[height] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]'}`}
               style={{ height: `${visibleContentHeight}px` }}
             >
               <div ref={contentRef} className="px-0 md:px-3 pt-1 md:pt-2 pb-8 md:pb-10 prose prose-stone max-w-none text-museum-800 leading-relaxed md:leading-loose md:text-justify whitespace-pre-line">
@@ -400,12 +405,12 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
                   {data.argument}
                 </span>
               </div>
-              {!isExpanded && isCollapsible && (
+              {!isStreaming && !isExpanded && isCollapsible && (
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 md:h-32 bg-gradient-to-t from-white via-white/80 to-transparent transition-opacity duration-300" />
               )}
             </div>
 
-            {isCollapsible && (
+            {!isStreaming && isCollapsible && (
               <div className={`relative z-10 flex justify-center border-t border-museum-100 ${isExpanded ? 'bg-white/72' : 'bg-white/86'} md:backdrop-blur-[2px] px-3 py-3 md:px-4 md:py-4 transition-colors duration-300`}>
                 <button
                   type="button"
