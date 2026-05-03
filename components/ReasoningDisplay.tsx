@@ -1,26 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, BrainCircuit, Search, BookOpen, Scale, CheckCircle2, Circle } from 'lucide-react';
-import { GenerationProgress } from '../types';
+import { GenerationLogEntry, GenerationProgress } from '../types';
+import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import GenerationLogPanel from './GenerationLogPanel';
 
 interface ReasoningDisplayProps {
   isAnalyzing: boolean;
   isFinished: boolean;
   progress?: GenerationProgress | null;
+  log?: GenerationLogEntry[];
 }
 
-const stageLabel: Record<string, string> = {
-  idle: '等待提问',
-  outline: '整理问题结构',
-  route: '生成论证路线',
-  voices: '生成思想声音',
-  synthesis: '综合判断',
-  done: '完成',
-  error: '遇到错误',
-};
-
-const stageOrder = ['outline', 'route', 'voices', 'synthesis', 'done'];
-
-const stageSteps = [
+const stageSteps: Array<{ key: GenerationProgress['stage']; title: string; description: string; icon: typeof BrainCircuit }> = [
   { key: 'outline', title: '整理问题结构', description: '把原始困惑改写成大问题、关键词和阅读框架。', icon: BrainCircuit },
   { key: 'route', title: '补全论证路线', description: '把分析路径拆成可阅读的节点和张力。', icon: Search },
   { key: 'voices', title: '生成思想声音', description: '并发写作每一种立场的长篇论述与头像。', icon: BookOpen },
@@ -54,7 +45,7 @@ const estimatePercent = (stage: string, total: number, completed: number, stream
   return Math.min(82, Math.round(42 + completedVoicePercent + currentVoiceBoost));
 };
 
-const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress }) => {
+const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress, log }) => {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
 
@@ -72,7 +63,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
   if (!isAnalyzing && !progress) return null;
 
   const currentStage = progress?.stage || 'outline';
-  const currentIndex = stageOrder.indexOf(currentStage);
+  const currentIndex = STAGE_ORDER.indexOf(currentStage);
   const isDone = isFinished || currentStage === 'done';
   const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
   const total = progress?.totalVoices || 0;
@@ -112,7 +103,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
             <div>
               <span className="font-serif italic text-museum-900">Sophia 的思想工作台</span>
               <p className="text-xs font-mono uppercase tracking-widest text-museum-400 mt-1">
-                第 {stageNumber} 步 · {stageLabel[currentStage]} {progress?.modeLabel ? `· ${progress.modeLabel}` : ''}
+                第 {stageNumber} 步 · {STAGE_LABEL[currentStage]} {progress?.modeLabel ? `· ${progress.modeLabel}` : ''}
               </p>
             </div>
           </div>
@@ -136,7 +127,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
         <div className="mb-5 grid grid-cols-1 gap-3 border border-museum-100 bg-museum-50/50 p-4 md:grid-cols-3">
           <div>
             <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">当前阶段</p>
-            <p className="mt-1 font-serif text-lg text-museum-900">{stageLabel[currentStage]}</p>
+            <p className="mt-1 font-serif text-lg text-museum-900">{STAGE_LABEL[currentStage]}</p>
             <p className="mt-1 text-xs text-museum-500">已完成 {completedStageCount}/{stageSteps.length} 个大步骤</p>
           </div>
           <div>
@@ -154,7 +145,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {stageSteps.map((step, idx) => {
             const Icon = step.icon;
-            const stepIndex = stageOrder.indexOf(step.key);
+            const stepIndex = STAGE_ORDER.indexOf(step.key);
             const active = step.key === currentStage;
             const complete = currentIndex > stepIndex || isDone;
             return (

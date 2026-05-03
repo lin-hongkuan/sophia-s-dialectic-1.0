@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
-import { ArrowRight, ChevronDown, ChevronUp, Compass, FlaskConical, LayoutGrid, Layers, MessageSquare, Sparkles, Stethoscope } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConical, LayoutGrid, Layers, MessageSquare, Sparkles, Stethoscope } from 'lucide-react';
 import { getReflectionFeedback } from '../services/sophiaService';
+import { buildMarkdownFilename, buildResultMarkdown, copyMarkdown, downloadMarkdown } from '../utils/exportResult';
+import { validateUserPrompt, ValidationMode } from '../utils/inputValidation';
 
 type StudioMode = 'voice' | 'branch' | 'note';
 
@@ -11,6 +13,8 @@ interface ArenaProps {
   onReset: () => void;
   onFollowUp?: (question: string) => void;
   onAppendThoughtVoice?: (prompt: string) => void;
+  onRetryVoice?: (voiceId: string) => void;
+  retryingVoiceId?: string | null;
   isGenerating?: boolean;
   isAppendingVoice?: boolean;
 }
@@ -57,24 +61,31 @@ const modeCopy: Record<StudioMode, { title: string; description: string; placeho
   },
 };
 
-const isLooseGreeting = (value: string) => {
-  const text = value.trim().replace(/[！!。,.，？?\s]/g, '');
-  return text.length > 0 && text.length <= 4 && /^(你好|您好|嗨|哈喽|hello|hi|在吗)$/i.test(text);
+const STUDIO_VALIDATION_MODE: Record<StudioMode, ValidationMode> = {
+  voice: 'voice',
+  branch: 'branch',
+  note: 'note',
 };
 
-const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, isGenerating, isAppendingVoice }) => {
+const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, onRetryVoice, retryingVoiceId, isGenerating, isAppendingVoice }) => {
   const [reflection, setReflection] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isGettingFeedback, setIsGettingFeedback] = useState(false);
   const [keywordsOpen, setKeywordsOpen] = useState(() => typeof window === 'undefined' ? true : window.matchMedia('(min-width: 768px)').matches);
   const [studioMode, setStudioMode] = useState<StudioMode>('voice');
   const [studioHint, setStudioHint] = useState('');
+  const [exportMessage, setExportMessage] = useState('');
+  const [isCopyingExport, setIsCopyingExport] = useState(false);
 
   const handleReflectionSubmit = async () => {
     const trimmed = reflection.trim();
     if (!trimmed) return;
-    if (isLooseGreeting(trimmed)) {
-      setStudioHint('可以把它写成一位想邀请的思想家，或一个更具体的追问。比如“让加缪加入讨论”。');
+    const validation = validateUserPrompt(trimmed, { mode: STUDIO_VALIDATION_MODE[studioMode] });
+    if (!validation.ok) {
+      const suggestionTail = validation.suggestions && validation.suggestions.length > 0
+        ? ` 试试：${validation.suggestions.slice(0, 2).join(' / ')}。`
+        : '';
+      setStudioHint(`${validation.hint || '这段输入还不太完整。'}${suggestionTail}`);
       return;
     }
 
@@ -101,11 +112,27 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
   };
 
   const hasSynthesis = data.tensions.length > 0 || data.conclusion.summary;
+  const hasUnexportableVoice = data.voices.some((voice) => voice.status === 'queued' || voice.status === 'generating' || voice.status === 'failed');
+  const isExportable = !isGenerating && !isAppendingVoice && !hasUnexportableVoice && !!hasSynthesis;
   const currentMode = modeCopy[studioMode];
   const isStudioBusy = isGettingFeedback || isAppendingVoice || isGenerating;
 
+  const handleCopyMarkdown = async () => {
+    if (!isExportable || isCopyingExport) return;
+    setIsCopyingExport(true);
+    const ok = await copyMarkdown(buildResultMarkdown(data));
+    setExportMessage(ok ? '已复制 Markdown。' : '复制失败，可以改用下载。');
+    setIsCopyingExport(false);
+  };
+
+  const handleDownloadMarkdown = () => {
+    if (!isExportable) return;
+    const ok = downloadMarkdown(buildMarkdownFilename(data), buildResultMarkdown(data));
+    setExportMessage(ok ? '已开始下载 Markdown。' : '当前浏览器不支持下载，请尝试复制 Markdown。');
+  };
+
   return (
-    <div className="w-full max-w-[100rem] mx-auto px-3 sm:px-4 pb-20 animate-fade-in">
+    <div className="w-full max-w-[100rem] mx-auto px-4 sm:px-6 pb-20 animate-fade-in">
       <div className="text-center py-5 md:py-20 space-y-4 md:space-y-5">
         <div className="inline-flex items-center gap-2 border border-museum-300 px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm">
           {modeIcon[data.mode] || <Compass className="w-4 h-4" />}
@@ -119,10 +146,35 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
             </p>
           </div>
         </div>
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex w-full max-w-4xl flex-col justify-center gap-2 sm:w-auto sm:flex-row">
+            <button
+              type="button"
+              onClick={handleCopyMarkdown}
+              disabled={!isExportable || isCopyingExport}
+              title={isExportable ? '复制当前结果为 Markdown' : '结果生成完成后可导出'}
+              className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/75 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Copy className="w-3.5 h-3.5" /> {isCopyingExport ? '复制中...' : '复制 Markdown'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadMarkdown}
+              disabled={!isExportable}
+              title={isExportable ? '下载当前结果为 Markdown 文件' : '结果生成完成后可导出'}
+              className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/75 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Download className="w-3.5 h-3.5" /> 下载 Markdown
+            </button>
+          </div>
+          <p className="min-h-[1.25rem] text-xs text-museum-500">
+            {exportMessage || (!isExportable ? '结果生成完成后可导出。' : '导出内容不包含 API 配置或头像生成信息。')}
+          </p>
+        </div>
         {isGenerating && (
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-museum-900 text-museum-50 rounded-full text-xs font-mono uppercase tracking-widest">
             <span className="w-2 h-2 bg-museum-50 rounded-full animate-pulse" />
-            内容仍在展开，完成一段显示一段
+            内容仍在展开
           </div>
         )}
       </div>
@@ -133,13 +185,13 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
           <h2 className="font-serif text-2xl md:text-4xl text-museum-900 mt-3">问题图谱</h2>
         </div>
         <div className="relative p-4 md:p-10">
-          <div className="hidden md:block absolute left-[18%] right-[18%] top-1/2 h-px bg-museum-200" />
-          <div className="hidden md:block absolute left-1/2 top-[18%] bottom-[18%] w-px bg-museum-100" />
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_1.15fr_1fr] gap-5 md:gap-8 items-center">
+          <div className="hidden lg:block absolute left-[18%] right-[18%] top-1/2 h-px bg-museum-200" />
+          <div className="hidden lg:block absolute left-1/2 top-[18%] bottom-[18%] w-px bg-museum-100" />
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.15fr_1fr] gap-5 lg:gap-8 items-center">
             <FrameNode label="原始困惑" text={data.questionFrame.original} />
             <div className="relative">
-              <div className="hidden md:block absolute -left-4 top-1/2 w-2 h-2 rounded-full bg-museum-800 -translate-y-1/2" />
-              <div className="hidden md:block absolute -right-4 top-1/2 w-2 h-2 rounded-full bg-museum-800 -translate-y-1/2" />
+              <div className="hidden lg:block absolute -left-4 top-1/2 w-2 h-2 rounded-full bg-museum-800 -translate-y-1/2" />
+              <div className="hidden lg:block absolute -right-4 top-1/2 w-2 h-2 rounded-full bg-museum-800 -translate-y-1/2" />
               <FrameNode label="核心问题" text={data.questionFrame.bigQuestion} emphasis />
             </div>
             <FrameNode label="现实翻译" text={data.questionFrame.plainTranslation} />
@@ -360,7 +412,14 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
         </div>
         <div className="w-full max-w-[98rem] mx-auto space-y-5 md:space-y-16">
           {data.voices.map((voice, idx) => (
-            <ThoughtVoiceCard key={voice.id} data={voice} index={idx} />
+            <ThoughtVoiceCard
+              key={voice.id}
+              data={voice}
+              index={idx}
+              onRetry={onRetryVoice}
+              isRetrying={retryingVoiceId === voice.id}
+              retryDisabled={!!isGenerating || !!isAppendingVoice || (!!retryingVoiceId && retryingVoiceId !== voice.id)}
+            />
           ))}
         </div>
       </section>
@@ -405,7 +464,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
           <p className="text-sm md:text-base text-museum-600 leading-relaxed mt-3 max-w-3xl">你可以让一位新的思想家加入当前结果，也可以沿着一个问题开启新支路，或直接把没想通的地方交给 Sophia 回应。</p>
         </div>
 
-        <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-museum-100 bg-museum-50/45">
+        <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-3 border-b border-museum-100 bg-museum-50/45">
           {(['voice', 'branch', 'note'] as StudioMode[]).map((mode) => (
             <button
               key={mode}
@@ -430,7 +489,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
                 key={chip}
                 type="button"
                 onClick={() => setReflection(chip)}
-                className="px-3 py-1.5 rounded-full border border-museum-200 bg-white/75 text-xs text-museum-700 hover:border-museum-500 hover:bg-white transition-colors"
+                className="inline-flex min-h-[36px] items-center px-3.5 py-2 rounded-full border border-museum-200 bg-white/75 text-xs text-museum-700 hover:border-museum-500 hover:bg-white transition-colors md:min-h-0 md:py-1.5 md:px-3"
               >
                 {chip}
               </button>
