@@ -277,34 +277,66 @@ const apiErrorMessage = async (response: Response) => {
   return trail.length > 0 ? `${summary}（${trail.join(' · ')}）` : summary;
 };
 
+// Avatar request semaphore — caps concurrent /images/generations calls so a slow image
+// model can't stack up requests when several voices are running in parallel. The limit is
+// re-read on every release so a settings change takes effect mid-run.
+let avatarInFlight = 0;
+const avatarWaiters: Array<() => void> = [];
+
+const acquireAvatarSlot = (): Promise<void> => {
+  const limit = Math.max(1, getActiveConfig().options.avatarConcurrency);
+  if (avatarInFlight < limit) {
+    avatarInFlight += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    avatarWaiters.push(resolve);
+  });
+};
+
+const releaseAvatarSlot = (): void => {
+  avatarInFlight = Math.max(0, avatarInFlight - 1);
+  const limit = Math.max(1, getActiveConfig().options.avatarConcurrency);
+  while (avatarInFlight < limit && avatarWaiters.length > 0) {
+    const wake = avatarWaiters.shift()!;
+    avatarInFlight += 1;
+    wake();
+  }
+};
+
 const callAvatarImage = async (prompt: string): Promise<string> => {
-  const cfg = getActiveConfig();
-  const response = await fetchWithRetry(imageEndpoint(), {
-    method: 'POST',
-    headers: requestHeaders(),
-    body: JSON.stringify({
-      model: cfg.avatarImageModel,
-      prompt,
-      n: 1,
-      size: cfg.avatarImageSize,
-      response_format: 'b64_json',
-    }),
-  }, { timeoutMs: 120000, label: 'avatar-image' });
+  await acquireAvatarSlot();
+  try {
+    const cfg = getActiveConfig();
+    const response = await fetchWithRetry(imageEndpoint(), {
+      method: 'POST',
+      headers: requestHeaders(),
+      body: JSON.stringify({
+        model: cfg.avatarImageModel,
+        prompt,
+        n: 1,
+        size: cfg.avatarImageSize,
+        response_format: 'b64_json',
+      }),
+    }, { timeoutMs: 120000, label: 'avatar-image' });
 
-  if (!response.ok) {
-    throw new Error(await apiErrorMessage(response));
-  }
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response));
+    }
 
-  const data = await response.json().catch(() => ({} as any));
-  recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
-  const item = data?.data?.[0];
-  if (item?.b64_json) {
-    return `data:image/png;base64,${item.b64_json}`;
+    const data = await response.json().catch(() => ({} as any));
+    recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
+    const item = data?.data?.[0];
+    if (item?.b64_json) {
+      return `data:image/png;base64,${item.b64_json}`;
+    }
+    if (typeof item?.url === 'string' && item.url) {
+      return item.url;
+    }
+    throw new Error(`${cfg.apiProvider} 图片接口未返回可用图像。`);
+  } finally {
+    releaseAvatarSlot();
   }
-  if (typeof item?.url === 'string' && item.url) {
-    return item.url;
-  }
-  throw new Error(`${cfg.apiProvider} 图片接口未返回可用图像。`);
 };
 
 export const buildThoughtVoiceAvatarPrompt = (

@@ -855,7 +855,7 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
             title="运行参数"
             description="影响每次生成的 LLM 行为。改动后立即对下一次生成生效。"
           />
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
             <div>
               <div className="flex items-baseline justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-widest text-museum-500">Temperature</span>
@@ -886,7 +886,23 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
                 onChange={(e) => handleOptionChange({ voiceConcurrency: Number(e.target.value) })}
                 className="mt-2 w-full"
               />
-              <p className="mt-1 text-[11px] text-museum-500">同时生成的思想声音数。提高更快，但更可能触发上游限流。</p>
+              <p className="mt-1 text-[11px] text-museum-500">同时生成的思想声音数。默认 2。提高更快，但更易触发限流。</p>
+            </div>
+            <div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] font-mono uppercase tracking-widest text-museum-500">Avatar 并发</span>
+                <span className="font-mono text-sm text-museum-800">{settings.options.avatarConcurrency}</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={settings.options.avatarConcurrency}
+                onChange={(e) => handleOptionChange({ avatarConcurrency: Number(e.target.value) })}
+                className="mt-2 w-full"
+              />
+              <p className="mt-1 text-[11px] text-museum-500">同时排队的头像图像请求数。默认 2。如果上游图像服务 CPU 过载，可调到 1。</p>
             </div>
             <div>
               <div className="flex items-baseline justify-between">

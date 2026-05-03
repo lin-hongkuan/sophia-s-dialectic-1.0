@@ -30,8 +30,11 @@ export interface RuntimeOptions {
   temperature: number;
   /** Max tokens for the long-form voice essay call. Default 7000. */
   voiceMaxTokens: number;
-  /** Concurrency for parallel voice generation. Default 3. */
+  /** Concurrency for parallel voice generation. Default 2. */
   voiceConcurrency: number;
+  /** Concurrency for parallel avatar image generation. Default 2. Capped independently of
+   *  voiceConcurrency so a slow image model can't pile up requests on the upstream provider. */
+  avatarConcurrency: number;
 }
 
 export interface SophiaSettings {
@@ -58,7 +61,8 @@ export interface ResolvedSophiaConfig {
 const DEFAULT_OPTIONS: RuntimeOptions = {
   temperature: 0.72,
   voiceMaxTokens: 7000,
-  voiceConcurrency: 3,
+  voiceConcurrency: 2,
+  avatarConcurrency: 2,
 };
 
 const DEFAULT_CUSTOM_PROVIDER: CustomProvider = {
@@ -146,6 +150,8 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
         ? Math.round(opt.voiceMaxTokens) : merged.options.voiceMaxTokens,
       voiceConcurrency: typeof opt.voiceConcurrency === 'number' && opt.voiceConcurrency >= 1 && opt.voiceConcurrency <= 5
         ? Math.round(opt.voiceConcurrency) : merged.options.voiceConcurrency,
+      avatarConcurrency: typeof opt.avatarConcurrency === 'number' && opt.avatarConcurrency >= 1 && opt.avatarConcurrency <= 5
+        ? Math.round(opt.avatarConcurrency) : merged.options.avatarConcurrency,
     };
   }
 
