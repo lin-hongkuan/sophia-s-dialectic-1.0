@@ -26,8 +26,12 @@ import {
   THOUGHT_VOICE_AVATAR_STYLE,
   VALID_MODES,
   VOICE_KIND_AVATAR_SUBJECT,
+  resolveHistoricalPhilosopherAvatarStyle,
+  resolveHistoricalPhilosopherNegativeAvatarPrompt,
+  resolveNegativeAvatarPrompt,
   resolveOutlineSystemPrompt,
   resolveSynthesisSystemPrompt,
+  resolveThoughtVoiceAvatarStyle,
   resolveVoiceSystemPrompt,
 } from './prompts';
 import { getActiveConfig } from './sophiaConfig';
@@ -87,6 +91,31 @@ const emitLog = (entry: Omit<GenerationLogEntry, 'id' | 'ts'> & { id?: string; t
     message: entry.message,
     tokens: entry.tokens,
   });
+};
+
+/**
+ * Heartbeat helper for long blocking single LLM calls (outline / route / synthesis).
+ * The user's pain: a 20-30s call emits one log line then nothing — feels frozen.
+ * Heartbeat emits a 'detail' tick every ~10s so the log feed shows the system is alive.
+ * Cleanup is idempotent.
+ */
+const startHeartbeat = (stage: GenerationLogEntry['stage'], label: string, intervalMs = 10000) => {
+  if (typeof window === 'undefined') return () => {};
+  const startedAt = Date.now();
+  const ctx = currentRunContext();
+  const voiceId = ctx?.voiceId;
+  const voiceName = ctx?.voiceName;
+  const handle = window.setInterval(() => {
+    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+    emitLog({
+      level: 'detail',
+      stage,
+      voiceId,
+      voiceName,
+      message: `${label}（已等待 ${elapsedSec}s，模型仍在处理...）`,
+    });
+  }, intervalMs);
+  return () => window.clearInterval(handle);
 };
 
 const recordUsageFromResponse = (
@@ -291,7 +320,7 @@ export const buildThoughtVoiceAvatarPrompt = (
     ? 'Historical likeness cues: use the voice name to infer recognizable portrait references and era-specific details. For example, Sartre may have round glasses, a slightly asymmetrical gaze and Left Bank intellectual austerity; Spinoza may suggest a 17th-century Dutch-Sephardic scholar portrait with dark period clothing and lens-grinder study ambience; Camus may suggest a mid-century French-Algerian writer in black-and-white editorial mood, trench-coat restraint and direct lucid gaze.'
     : '';
   return [
-    isHistoricalPhilosopher ? HISTORICAL_PHILOSOPHER_AVATAR_STYLE : THOUGHT_VOICE_AVATAR_STYLE,
+    isHistoricalPhilosopher ? resolveHistoricalPhilosopherAvatarStyle(cfg.promptOverrides) : resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
     `Subject: ${subject}`,
     `Voice name (semantic anchor only, do NOT render as text): ${voicePlan.name}`,
     historicalLikenessLine,
@@ -303,7 +332,7 @@ export const buildThoughtVoiceAvatarPrompt = (
     `Big question: ${outline.philosophical_title}`,
     `Analytical mode: ${outline.modeLabel}`,
     `Composition: ${cfg.avatarAspectHint}, slightly taller-than-wide editorial portrait, head-and-shoulders or symbolic chest-up vignette, centered, soft directional light, calm museum-catalog atmosphere. Avoid square crop; leave quiet vertical breathing room above and below the figure.`,
-    isHistoricalPhilosopher ? HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT : NEGATIVE_AVATAR_PROMPT,
+    isHistoricalPhilosopher ? resolveHistoricalPhilosopherNegativeAvatarPrompt(cfg.promptOverrides) : resolveNegativeAvatarPrompt(cfg.promptOverrides),
   ].join('\n');
 };
 
@@ -314,11 +343,12 @@ export const generateThoughtVoiceAvatar = async (
 ): Promise<ThoughtVoiceImageAvatar> => {
   const prompt = buildThoughtVoiceAvatarPrompt(topic, outline, voicePlan);
   const imageUrl = await callAvatarImage(prompt);
+  const cfg = getActiveConfig();
   return {
     imageUrl,
     prompt,
-    style: THOUGHT_VOICE_AVATAR_STYLE,
-    model: getActiveConfig().avatarImageModel,
+    style: resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
+    model: cfg.avatarImageModel,
     alt: `${voicePlan.name} 的竖版思想声音头像`,
     generatedAt: new Date().toISOString(),
     subjectType: voicePlan.kind,
@@ -705,7 +735,7 @@ const formatContinuationContext = (context?: ContinuationContext) => {
 const generateOutline = async (topic: string, continuationContext?: ContinuationContext): Promise<AnalysisOutline> => {
   const continuationText = formatContinuationContext(continuationContext);
   const raw = await callChatJson<any>([
-    { role: 'system', content: resolveOutlineSystemPrompt() },
+    { role: 'system', content: resolveOutlineSystemPrompt(getActiveConfig().promptOverrides) },
     {
       role: 'user',
       content: `为这个用户问题设计哲学分析骨架：${topic}${continuationText}
@@ -797,7 +827,7 @@ const generateVoiceEssay = async (
     return undefined;
   });
   const argument = await callChatText([
-    { role: 'system', content: resolveVoiceSystemPrompt() },
+    { role: 'system', content: resolveVoiceSystemPrompt(getActiveConfig().promptOverrides) },
     {
       role: 'user',
       content: `用户问题：${topic}
@@ -890,7 +920,7 @@ const generateSynthesis = async (
   };
 
   const raw = await callChatJson<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>([
-    { role: 'system', content: resolveSynthesisSystemPrompt() },
+    { role: 'system', content: resolveSynthesisSystemPrompt(getActiveConfig().promptOverrides) },
     {
       role: 'user',
       content: `用户问题：${topic}
@@ -1277,7 +1307,13 @@ export const analyzeTopic = async (
       completedVoices: 0,
       messages: [continuationContext ? '正在沿着上一份分析继续展开...' : '正在把问题整理成一张思想地图...'],
     });
-    const outline = await generateOutline(userTopic, continuationContext);
+    const stopOutlineHeartbeat = startHeartbeat('outline', '正在等待问题图谱返回');
+    let outline: AnalysisOutline;
+    try {
+      outline = await generateOutline(userTopic, continuationContext);
+    } finally {
+      stopOutlineHeartbeat();
+    }
     callbacks.onOutline?.(outline);
     emitLog({ level: 'info', stage: 'outline', message: `问题图谱已成形 · 分析路径：${outline.modeLabel}（计划 ${outline.voicePlans.length} 位思想声音）。` });
 
@@ -1292,7 +1328,13 @@ export const analyzeTopic = async (
     });
     emitLog({ level: 'info', stage: 'route', message: '正在补全论证路线图...' });
 
-    const routeMap = await generateRouteDetails(userTopic, outline);
+    const stopRouteHeartbeat = startHeartbeat('route', '正在等待论证路线图返回');
+    let routeMap;
+    try {
+      routeMap = await generateRouteDetails(userTopic, outline);
+    } finally {
+      stopRouteHeartbeat();
+    }
     result = { ...result, routeMap };
     callbacks.onRouteMap?.(routeMap);
     emitLog({ level: 'info', stage: 'route', message: `已生成 ${routeMap.length} 个路线节点。` });
@@ -1394,7 +1436,13 @@ export const analyzeTopic = async (
       messages: ['正在生成分歧、关键词和综合判断...'],
     });
     emitLog({ level: 'info', stage: 'synthesis', message: `所有思想声音已收束（${completedVoices.length}/${outline.voicePlans.length} 完成），正在生成分歧、关键词与综合判断...` });
-    const synthesis = await generateSynthesis(userTopic, outline, completedVoices);
+    const stopSynthesisHeartbeat = startHeartbeat('synthesis', '正在等待综合判断返回');
+    let synthesis;
+    try {
+      synthesis = await generateSynthesis(userTopic, outline, completedVoices);
+    } finally {
+      stopSynthesisHeartbeat();
+    }
     callbacks.onSynthesis?.(synthesis);
     emitLog({ level: 'info', stage: 'synthesis', message: `综合判断已完成（${synthesis.tensions.length} 条分歧 / ${synthesis.keywords.length} 个关键词 / ${synthesis.followUps.length} 条延伸追问）。` });
 

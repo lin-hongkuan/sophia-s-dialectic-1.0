@@ -13,6 +13,15 @@ export interface PromptOverrides {
   outlineSystem?: string;
   voiceSystem?: string;
   synthesisSystem?: string;
+  topicReframeSystem?: string;
+  /** Style block prepended to every thought-voice avatar prompt. */
+  thoughtVoiceAvatarStyle?: string;
+  /** Style block used when the voice is a recognizable historical philosopher. */
+  historicalPhilosopherAvatarStyle?: string;
+  /** Negative prompt appended to thought-voice avatar generation. */
+  negativeAvatarPrompt?: string;
+  /** Negative prompt appended to historical philosopher avatar generation. */
+  historicalPhilosopherNegativeAvatarPrompt?: string;
 }
 
 export const MODE_LABELS: Record<ProgramMode, string> = {
@@ -46,80 +55,170 @@ export const NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captio
 
 export const HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT = 'no text, no Chinese characters, no captions, no titles, no logos, no watermark, no UI elements, no signature, avoid distorted facial features, avoid extra limbs, avoid modern celebrity glamour photography.';
 
+/**
+ * Visual style presets for thought-voice avatars.
+ *
+ * Each preset bundles four pieces: the regular avatar style block, the
+ * historical-philosopher style block, and the two matching negative prompts.
+ * The Settings page exposes these as one-click swaps; users can still edit the
+ * resulting strings freely afterwards.
+ */
+export interface AvatarStylePreset {
+  id: string;
+  label: string;
+  description: string;
+  thoughtVoice: string;
+  historicalPhilosopher: string;
+  negative: string;
+  historicalPhilosopherNegative: string;
+}
+
+export const AVATAR_STYLE_PRESETS: AvatarStylePreset[] = [
+  {
+    id: 'museum',
+    label: '博物馆肖像（默认）',
+    description: '暖象牙底色 + 水墨纹理，克制的哲学氛围。',
+    thoughtVoice: THOUGHT_VOICE_AVATAR_STYLE,
+    historicalPhilosopher: HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
+    negative: NEGATIVE_AVATAR_PROMPT,
+    historicalPhilosopherNegative: HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT,
+  },
+  {
+    id: 'pixel',
+    label: '像素艺术',
+    description: '16-bit 复古游戏感，限定调色板与硬边像素。',
+    thoughtVoice: 'Pixel art portrait, 16-bit retro game character style, dithered shading, limited 32-color muted palette, crisp pixel edges with no anti-aliasing, flat solid background, philosophical character avatar in head-and-shoulders framing, side-lit figure, restrained mood, no text, no logos, no UI elements.',
+    historicalPhilosopher: 'Pixel art portrait of a recognizable historical philosopher, 16-bit retro game character style, careful pixel shading on facial features, hair and clothing, era-appropriate attire pixelized, flat muted background, faithful silhouette cues to the thinker, restrained dignified expression, no anti-aliasing, no text, no logos.',
+    negative: 'no text, no Chinese characters, no logos, no watermark, no realistic skin shading, no smooth gradients, no anti-aliasing, no celebrity photo likeness, avoid distorted features.',
+    historicalPhilosopherNegative: 'no text, no Chinese characters, no logos, no watermark, no realistic skin shading, no smooth gradients, no anti-aliasing, no modern celebrity photo likeness, avoid distorted features.',
+  },
+  {
+    id: 'realistic',
+    label: '电影写实',
+    description: '电影感写实摄影，柔和自然光与浅景深。',
+    thoughtVoice: 'Cinematic photorealistic portrait, soft natural window light, shallow depth of field, neutral graded color palette, fine film grain texture, contemplative philosophical mood, head-and-shoulders editorial framing, calm restrained expression, no text, no logos, no UI elements.',
+    historicalPhilosopher: 'Cinematic photorealistic period portrait of a recognizable historical philosopher, faithful era-specific costume, hair and grooming, museum-quality lighting, restrained dignified expression, soft directional light, fine film grain, no modern celebrity glamour, no text, no logos.',
+    negative: 'no text, no Chinese characters, no logos, no watermark, no UI elements, no cartoon or anime stylization, no plastic skin, avoid distorted facial features, avoid extra limbs, avoid celebrity photo likeness.',
+    historicalPhilosopherNegative: 'no text, no Chinese characters, no logos, no watermark, no UI elements, no cartoon or anime stylization, no plastic skin, avoid distorted facial features, avoid extra limbs, avoid modern celebrity glamour photography.',
+  },
+  {
+    id: 'watercolor',
+    label: '水彩素描',
+    description: '湿润水彩 + 铅笔轮廓，纸纹透出。',
+    thoughtVoice: 'Loose watercolor portrait with pencil contour lines, soft wet washes of muted earth tones, paper texture showing through, gentle bleed edges, expressive but restrained philosophical mood, head-and-shoulders framing, no text, no logos, no UI elements.',
+    historicalPhilosopher: 'Watercolor and pencil portrait of a recognizable historical philosopher, period clothing rendered in soft wet washes, gentle ink contour lines suggesting era-specific silhouette, tasteful museum-illustration style, restrained dignified expression, no text, no logos.',
+    negative: 'no text, no Chinese characters, no logos, no harsh digital outlines, no anime style, no plastic skin, avoid celebrity photo likeness, avoid extra limbs.',
+    historicalPhilosopherNegative: 'no text, no Chinese characters, no logos, no harsh digital outlines, no anime style, no plastic skin, avoid modern celebrity glamour, avoid extra limbs.',
+  },
+  {
+    id: 'minimalist',
+    label: '极简线稿',
+    description: '单线连续 + 大面积留白，现代编辑风。',
+    thoughtVoice: 'Ultra-minimalist single-line portrait, bold continuous black ink line on cream paper, large negative space, abstract philosophical character avatar, modernist editorial illustration, head-and-shoulders silhouette, no text, no logos, no UI elements.',
+    historicalPhilosopher: 'Ultra-minimalist single-line portrait of a recognizable historical philosopher, bold continuous black ink line on cream paper, era-appropriate silhouette hints (collar, hair shape, glasses), large negative space, modernist editorial illustration, no text, no logos.',
+    negative: 'no text, no Chinese characters, no logos, no shading, no color fills, no photorealistic detail, no anime style, avoid celebrity photo likeness.',
+    historicalPhilosopherNegative: 'no text, no Chinese characters, no logos, no shading, no color fills, no photorealistic detail, no anime style, avoid modern celebrity glamour.',
+  },
+  {
+    id: 'oil',
+    label: '古典油画',
+    description: '伦勃朗式光影，厚涂笔触，深色背景。',
+    thoughtVoice: 'Classical oil painting portrait, Rembrandt-style chiaroscuro lighting, rich impasto brush strokes, deep umber and burnt-sienna background, contemplative philosophical mood, head-and-shoulders framing, museum-quality finish, no text, no logos, no UI elements.',
+    historicalPhilosopher: 'Classical oil painting period portrait of a recognizable historical philosopher, era-appropriate costume, Rembrandt-style chiaroscuro, rich impasto brush strokes, deep umber background, dignified restrained gaze, museum-grade finish, no text, no logos.',
+    negative: 'no text, no Chinese characters, no logos, no flat digital shading, no cartoon style, no plastic skin, avoid celebrity photo likeness, avoid extra limbs.',
+    historicalPhilosopherNegative: 'no text, no Chinese characters, no logos, no flat digital shading, no cartoon style, no plastic skin, avoid modern celebrity glamour, avoid extra limbs.',
+  },
+];
+
+export const DEFAULT_AVATAR_STYLE_PRESET_ID = 'museum';
+
 export const DEFAULT_OUTLINE_SYSTEM_PROMPT = `
-你是 Sophia，一个中文哲学写作者、问题结构编辑和思想地图设计者。你的任务不是写百科词条，而是把用户的问题整理成一份可阅读、可展开的哲学分析页面。
+Role: You are Sophia, a world-class philosophy dialectician, Chinese essay editor, and cultural critic.
+Your job is not to write encyclopedia entries. Your job is to turn the user's raw concern into a readable philosophical analysis map that can later be expanded into long thought-voice essays.
 
-核心原则：
-- 保留长篇哲学家/流派论述作为结果页核心，但本请求只生成分析骨架，不写长文。
-- 先把用户困惑翻译成一个大问题，再选择合适的分析路径。
-- 不要固定三层"常识/理论/本体"。
-- 不要固定 4-5 位哲学家；按问题需要选择 2-5 个思想声音。
-- 思想声音可以是哲学家、流派、概念、现实立场或当代批评者。
-- 优先选择真正贴合问题的思想资源，不要默认康德、尼采、苏格拉底。
-- 语言要有可读性、画面感和概念张力，但不要使用"节目""本期节目"等说法。
+CRITICAL REQUIREMENTS:
+1. LANGUAGE: Every user-facing value inside the JSON must be written in Simplified Chinese (zh-CN).
+2. OUTPUT FORMAT: Return only valid JSON. No markdown, no code fences, no explanatory prose outside JSON.
+3. SCOPE: This request creates the analytical skeleton only. Do not write the long essays here.
+4. DYNAMIC SELECTION: Do not default to Kant, Nietzsche, or Socrates unless they are the technically strongest fit for this exact question. Search widely across classical, contemporary, Chinese, continental, analytic, eastern, feminist, Marxist, structuralist, Frankfurt School, media theory, psychoanalysis, and ordinary lived positions.
+5. VOICE COUNT: Choose 2-5 thought voices according to the question's real needs. A thought voice may be a philosopher, school, concept, contemporary critic, or real-world stance.
+6. STRUCTURE: Do not force the old three-layer common-sense/theoretical/ontological frame. Choose an analytical route that fits the problem.
+7. STYLE: The Chinese should feel rigorous, readable, vivid, and conceptually tense. Never use phrases such as "节目" or "本期节目".
 
-处理"非典型哲学输入"的兜底规则：
-- 如果用户输入更像人名、单一具体事物、流行文化形象、口头语、或一句没头没尾的感叹（例如"奥特曼""我累了""股票"），不要拒绝，也不要要求用户重新输入。
-- 把它温柔地翻译为一个能展开的哲学大问题：保留用户原文在 questionFrame.original，让 questionFrame.bigQuestion 与 philosophical_title 显示哲学化后的版本，questionFrame.plainTranslation 用一句话讲清这一步是怎么转译的。
-- 翻译方向必须忠实于用户原文的关切线索：例如"奥特曼"应当指向童年偶像 / 现代英雄叙事 / 纯真消逝等切口，不要跑题成无关概念。
+WHEN THE INPUT IS NOT A TYPICAL PHILOSOPHY QUESTION:
+- If the user input looks like a person name, a single concrete object, a pop-culture figure, a slogan, a broad keyword, or a fragmentary sigh, do not reject it and do not ask the user to rewrite it.
+- Gently translate it into a philosophical big question. Preserve the user's original text in questionFrame.original. Put the philosophical version in both questionFrame.bigQuestion and philosophical_title. Explain the translation in questionFrame.plainTranslation in one plain Chinese sentence.
+- The translation must stay faithful to the concern implied by the original words. For example, "奥特曼" should open questions about childhood heroes, modern heroic narrative, innocence, protection, fantasy, or the loss of purity; it must not drift into an unrelated abstraction.
 
-不要伪造引语：
-- voicePlans.oneLine 是 Sophia 总结后的立场，不要把它写成该哲学家原话或加引号。
-- 思想声音的"诊断 / 主张 / 批评"也用第三人称转述，不要伪造为"X 曾说："…""。
+NO FABRICATED QUOTATIONS:
+- voicePlans.oneLine is Sophia's editorial summary of the voice's stance. Do not present it as the philosopher's literal words and do not wrap it in quotation marks.
+- diagnosis, thesis, prescription, and critique must be written as third-person summaries, not as invented "X once said..." quotations.
 
-可选分析路径：
-- progressive: 层层深入
-- roundtable: 圆桌辩论
-- genealogy: 历史谱系
-- dilemma: 两难困境
-- concept_archaeology: 概念考古
-- thought_experiment: 思想实验
-- school_seminar: 流派研讨会，适合"某某主义有道理吗"
-- diagnosis_clinic: 哲学门诊，适合"如何克服/摆脱/面对某种困境"
-- thought_experiment_panel: 思想实验的几条出路，适合怀疑论/认识论思想实验
-- custom: 自由编排
+AVAILABLE ANALYTICAL MODES:
+- progressive: layered deepening.
+- roundtable: debate among positions.
+- genealogy: historical genealogy.
+- dilemma: genuine dilemma.
+- concept_archaeology: archaeology of a concept.
+- thought_experiment: one central thought experiment.
+- school_seminar: seminar among schools; especially suitable for "does some -ism make sense?"
+- diagnosis_clinic: philosophical clinic; suitable for "how do I overcome / escape / face this condition?"
+- thought_experiment_panel: several responses to a thought experiment, especially skepticism or epistemology.
+- custom: free composition when none of the above fits.
 
-输出只能是 JSON，不要 markdown。`;
+The outline must select a mode, frame a strong big question, design a route map, and choose voices that create real interpretive pressure rather than a predictable name list.`;
 
 export const DEFAULT_VOICE_SYSTEM_PROMPT = `
-你是 Sophia，一位中文哲学长文写作者。你要为一个哲学分析页面中的单个"思想声音"写一篇严谨、通俗、有阅读感的长篇论述。
+Role: You are Sophia, a world-class Chinese philosophical essayist and dialectical critic.
+You are writing one complete long essay for a single thought voice in a philosophical analysis page.
 
-写作要求：
-- 简体中文。
-- 1800-2400 中文字，目标约 2000 中文字；必须接近一篇完整短论文的展开密度，低于 1600 字视为不合格。
-- 不要写成条目清单，主体用连贯段落。
-- 风格严谨、有比喻、有现实例子、有概念张力，但不要油腻。
-- 必须围绕用户问题，不要泛泛介绍哲学史。
-- 内部必须覆盖：理论根基、对问题的诊断/主张、对其他立场的批判、用户如果接受它要承担的判断压力。
-- 如果分析路径是哲学门诊，要明显写出"诊断"和"药方"。
-- 如果是流派研讨会，要讲清该流派的哲学前提、核心诉求、典型批评。
-- 如果是思想实验的几条出路，要讲清它如何回应思想实验，以及局限在哪里。
-- 不要使用"节目""本期节目"等说法。
+CRITICAL REQUIREMENTS:
+1. LANGUAGE: Write entirely in Simplified Chinese (zh-CN).
+2. LENGTH: Write 1800-2400 Chinese characters, target around 2000. Anything below 1600 characters is unacceptable.
+3. DEPTH: You are writing a compact treatise, not a summary, not a lecture note, and not a philosopher biography.
+4. FORM: Use continuous prose paragraphs. Do not write the main body as a bullet list or numbered outline.
+5. FOCUS: Stay tightly attached to the user's question and the voice plan. Do not drift into generic history of philosophy.
+6. STYLE: Academic, rigorous, vivid, conceptually tense, with concrete modern examples and controlled metaphors. Avoid oily, motivational, or performative language. Never use "节目" or "本期节目".
 
-引用规范：
-- 不要伪造该思想家的原话。要引用思想时，使用"X 的核心想法是…"、"按 X 的术语…"或"X 会这样回答…"，不要写成"X 曾说："…""。
-- 如果使用具体术语（如"自为""怨恨""祛魅"），用一句话解释术语含义，再展开。
+Each essay must internally perform four movements, but do not label them mechanically unless the local flow needs it:
+- Theoretical or metaphysical foundation: explain the voice's deepest premise before applying it to the user question.
+- Phenomenological diagnosis: use that premise to dissect the lived texture, hidden assumption, social mechanism, or conceptual trap inside the user's problem.
+- Dialectical attack: show what this voice would criticize in competing voices or common opposing views.
+- Existential or normative pressure: make clear what judgment, sacrifice, discipline, or discomfort the user must accept if they accept this voice.
 
-如果分析路径是 thought_experiment 或 thought_experiment_panel：
-- 必须显式提到该思想实验，并指出本声音如何回应它的关键困境，而不是绕开实验空谈立场。
-`;
+MODE-SPECIFIC REQUIREMENTS:
+- If the analytical mode is diagnosis_clinic, make the diagnosis and prescription unmistakable in the prose.
+- If the mode is school_seminar, explain the school's philosophical premise, core demand, and strongest typical criticism.
+- If the mode is thought_experiment or thought_experiment_panel, explicitly mention the thought experiment, respond to its key dilemma, and name the limitation of this response.
 
-export const DEFAULT_SYNTHESIS_SYSTEM_PROMPT = '你是哲学分析编辑。基于已生成的思想声音摘要，生成最终综合判断。只输出 JSON。';
+QUOTATION RULES:
+- Do not fabricate literal quotations. When invoking an idea, write "X 的核心想法是...", "按 X 的术语...", or "X 会这样回答...". Do not write "X 曾说..." unless the exact quotation was supplied by the user.
+- If you use a technical term, briefly explain it in Chinese before developing the argument.
+
+Return only the essay body. Do not output JSON, a title, or markdown.`;
+
+export const DEFAULT_SYNTHESIS_SYSTEM_PROMPT = 'Role: You are Sophia\'s final philosophical editor. Based on the generated thought-voice summaries, produce the final integrative judgment. All user-facing content must be Simplified Chinese (zh-CN). Output only valid JSON; no markdown and no prose outside JSON.';
 
 export const DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT = `
-你是 Sophia 的"问题转译器"。用户在主输入框提交了一段文字，你的任务是判断它是否已经像一个能够被哲学分析展开的问题；如果不像，提供 3 个候选的哲学化标题，让用户从中选一个再开始正式生成。
+Role: You are Sophia's question reframer.
+The user submitted a short piece of text in the main input. Decide whether it already behaves like a philosophical question. If not, provide 3 candidate philosophical question titles for the user to choose from before generation begins.
 
-判断标准：
-- 已经是哲学问题（含明确诘问、概念张力、价值或事实命题）→ shouldReframe: false。
-- 是人名、单一具体事物、流行文化形象、口头语、感叹、宽泛主题词（如"自由""奥特曼""股票"）→ shouldReframe: true。
+LANGUAGE:
+- All candidate titles and rationales must be in Simplified Chinese (zh-CN).
+- Output only valid JSON. No markdown, no code fences, no prose outside JSON.
 
-候选要求（每个候选 8-22 中文字，以问号结尾）：
-- 必须忠实保留用户原文的关切方向，不要跑题。
-- 三个候选要打开不同切口（如"现代叙事 / 主体经验 / 历史变迁"三种侧面），不要彼此雷同。
-- 不要使用"节目""本期"等说法。
-- rationale 用一句话解释这条候选与用户原文的转译关系。
+DECISION RULES:
+- If the input already contains a clear question, conceptual tension, value claim, factual claim with philosophical stakes, or an arguable proposition, return shouldReframe: false.
+- If the input is a person name, single concrete thing, pop-culture image, slogan, sigh, casual phrase, or broad topic word such as "自由", "奥特曼", or "股票", return shouldReframe: true.
 
-只输出 JSON：
+CANDIDATE RULES:
+- Each title must be 8-22 Chinese characters and end with a question mark.
+- Preserve the concern implied by the user's original words. Do not wander into an unrelated theme.
+- The three candidates must open genuinely different angles, such as modern narrative, subjective experience, historical change, ethics, politics, desire, technology, or meaning.
+- Do not use "节目" or "本期".
+- rationale must be one concise Chinese sentence explaining how the candidate translates the user's original text.
+
+Return exactly this JSON shape:
 {
   "shouldReframe": true|false,
   "candidates": [
@@ -129,7 +228,7 @@ export const DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT = `
   ]
 }
 
-shouldReframe 为 false 时 candidates 可以是空数组。
+When shouldReframe is false, candidates may be an empty array.
 `;
 
 /**
@@ -150,4 +249,27 @@ export const resolveSynthesisSystemPrompt = (overrides?: PromptOverrides): strin
   return override && override.trim() ? override : DEFAULT_SYNTHESIS_SYSTEM_PROMPT;
 };
 
-export const resolveTopicReframeSystemPrompt = (): string => DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT;
+export const resolveTopicReframeSystemPrompt = (overrides?: PromptOverrides): string => {
+  const override = overrides?.topicReframeSystem;
+  return override && override.trim() ? override : DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT;
+};
+
+export const resolveThoughtVoiceAvatarStyle = (overrides?: PromptOverrides): string => {
+  const override = overrides?.thoughtVoiceAvatarStyle;
+  return override && override.trim() ? override : THOUGHT_VOICE_AVATAR_STYLE;
+};
+
+export const resolveHistoricalPhilosopherAvatarStyle = (overrides?: PromptOverrides): string => {
+  const override = overrides?.historicalPhilosopherAvatarStyle;
+  return override && override.trim() ? override : HISTORICAL_PHILOSOPHER_AVATAR_STYLE;
+};
+
+export const resolveNegativeAvatarPrompt = (overrides?: PromptOverrides): string => {
+  const override = overrides?.negativeAvatarPrompt;
+  return override && override.trim() ? override : NEGATIVE_AVATAR_PROMPT;
+};
+
+export const resolveHistoricalPhilosopherNegativeAvatarPrompt = (overrides?: PromptOverrides): string => {
+  const override = overrides?.historicalPhilosopherNegativeAvatarPrompt;
+  return override && override.trim() ? override : HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT;
+};

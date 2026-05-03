@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConic
 import { getReflectionFeedback } from '../services/sophiaService';
 import { buildMarkdownFilename, buildResultMarkdown, copyMarkdown, downloadMarkdown } from '../utils/exportResult';
 import { validateUserPrompt, ValidationMode } from '../utils/inputValidation';
+import { HangingLabel } from './PageHero';
 
 type StudioMode = 'voice' | 'branch' | 'note';
 
@@ -132,16 +133,19 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
   };
 
   return (
-    <div className="w-full max-w-[100rem] mx-auto px-4 sm:px-6 pb-20 animate-fade-in">
-      <div className="text-center py-5 md:py-20 space-y-4 md:space-y-5">
-        <div className="inline-flex items-center gap-2 border border-museum-300 px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm">
-          {modeIcon[data.mode] || <Compass className="w-4 h-4" />}
-          <span className="text-xs font-mono uppercase tracking-widest text-museum-800">论证路径 · {data.modeLabel}</span>
-        </div>
+    <div className="w-full max-w-[100rem] mx-auto px-4 sm:px-6 pb-20 animate-fade-in -mt-4 md:-mt-12">
+      <div className="text-center py-7 md:py-14 space-y-4 md:space-y-5">
+        <HangingLabel
+          icon={modeIcon[data.mode] || <Compass className="w-4 h-4" />}
+          ariaLabel={`Argument Route ${data.modeLabel}`}
+        >
+          Argument Route
+        </HangingLabel>
+        <p className="text-xs font-mono uppercase tracking-widest text-museum-600">{data.modeLabel}</p>
         <h1 className="font-serif text-3xl md:text-6xl text-museum-900 leading-tight break-words">{data.philosophical_title}</h1>
         <div className="max-w-4xl mx-auto mt-4 md:mt-6">
           <div className="bg-white/80 backdrop-blur-md border border-museum-200 shadow-sm p-4 md:p-8">
-            <p className="text-museum-800 italic text-base md:text-lg leading-relaxed whitespace-pre-line md:text-justify">
+            <p className="text-museum-800 text-base md:text-lg font-light leading-loose tracking-wide whitespace-pre-line md:text-justify">
               {data.introduction}
             </p>
           </div>
@@ -243,7 +247,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
       {data.programStructure.length > 0 && (
         <section className="max-w-5xl mx-auto mb-7 md:mb-16">
           <div className="text-center mb-5 md:mb-8">
-            <span className="text-sm font-serif italic text-museum-400">—— 阅读路径 ——</span>
+            <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  阅读路径  ——</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {data.programStructure.map((section, index) => (
@@ -322,7 +326,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
           <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-4 md:gap-6 mb-5 md:mb-8">
             <div className="bg-museum-900 text-museum-50 p-5 md:p-8">
               <p className="text-xs uppercase tracking-widest text-museum-300 mb-4">Scene</p>
-              {data.thoughtExperiment.poeticVersion && <p className="font-serif italic text-xl leading-relaxed mb-6">{data.thoughtExperiment.poeticVersion}</p>}
+              {data.thoughtExperiment.poeticVersion && <p className="font-serif font-light text-xl leading-loose tracking-wide mb-6">{data.thoughtExperiment.poeticVersion}</p>}
               <p className="text-museum-100 leading-loose whitespace-pre-line">{data.thoughtExperiment.unsettlingVersion}</p>
             </div>
             <div className="border border-museum-200 bg-museum-50/80 p-5 md:p-8">
@@ -384,7 +388,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
       {data.routeMap.length > 0 && (
         <section className="max-w-5xl mx-auto mb-8 md:mb-20">
           <div className="text-center mb-5 md:mb-10">
-            <span className="text-sm font-serif italic text-museum-400">—— 论证路线图 ——</span>
+            <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  论证路线图  ——</span>
           </div>
           <div className="space-y-4 md:space-y-5">
             {data.routeMap.map((node, index) => (
@@ -395,7 +399,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
                     <p className="text-xs uppercase tracking-widest text-museum-400 mb-2">{node.role}</p>
                     <h3 className="font-serif text-2xl md:text-3xl text-museum-900 mb-4">{node.title}</h3>
                     <p className="text-museum-800 leading-relaxed mb-4">{node.plain}</p>
-                    {node.philosophical && <p className="text-museum-800 leading-relaxed italic border-l-2 border-museum-200 pl-4">{node.philosophical}</p>}
+                    {node.philosophical && <p className="text-museum-800 font-light leading-loose tracking-wide border-l-2 border-museum-200 pl-4">{node.philosophical}</p>}
                     {node.tension && <p className="mt-4 text-sm font-medium text-museum-900 bg-museum-50 p-3">{node.tension}</p>}
                   </div>
                 </div>
@@ -407,7 +411,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
 
       <section className="mb-8 md:mb-20">
         <div className="text-center mb-5 md:mb-12">
-          <span className="text-sm font-serif italic text-museum-400">—— 思想声音 ——</span>
+          <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  思想声音  ——</span>
           <h2 className="font-serif text-2xl md:text-4xl text-museum-900 mt-3">几种立场的长篇展开</h2>
         </div>
         <div className="w-full max-w-[98rem] mx-auto space-y-5 md:space-y-16">
@@ -448,7 +452,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
               {data.conclusion.openQuestion && (
                 <div className="bg-white/10 p-6 mb-5">
                   <p className="text-xs uppercase tracking-widest text-museum-300 mb-2">仍然悬着的问题</p>
-                  <p className="font-serif text-2xl italic">{data.conclusion.openQuestion}</p>
+                  <p className="font-serif text-2xl font-light leading-loose tracking-wider">{data.conclusion.openQuestion}</p>
                 </div>
               )}
               {data.conclusion.realLifeReturn && <p className="text-museum-200 leading-relaxed">{data.conclusion.realLifeReturn}</p>}

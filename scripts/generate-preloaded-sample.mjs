@@ -13,7 +13,24 @@ process.chdir(projectRoot);
 process.env.GITHUB_ACTIONS = 'true';
 process.env.SOPHIA_IMAGE_ASPECT_HINT = process.env.SOPHIA_IMAGE_ASPECT_HINT || 'portrait 1:1.2 aspect ratio';
 
-const topic = process.argv.slice(2).join(' ').trim() || '女性主义有道理吗？';
+// CLI: positional args = topic; --provider=<id> overrides the active text-model preset
+// (preset:gpt | preset:mimo | preset:grok). Avatar model is always the env default.
+const validProviders = new Set(['preset:gpt', 'preset:mimo', 'preset:grok', 'custom']);
+const cliArgs = process.argv.slice(2);
+const positionalArgs = [];
+let providerOverride = null;
+for (const arg of cliArgs) {
+  if (arg.startsWith('--provider=')) {
+    const value = arg.slice('--provider='.length);
+    if (!validProviders.has(value)) {
+      throw new Error(`Invalid --provider value: ${value}. Expected one of: ${[...validProviders].join(', ')}`);
+    }
+    providerOverride = value;
+  } else {
+    positionalArgs.push(arg);
+  }
+}
+const topic = positionalArgs.join(' ').trim() || '女性主义有道理吗？';
 const generatedAt = new Date().toISOString();
 
 const slugify = (value, fallback) => {
@@ -87,6 +104,14 @@ try {
   mkdirSync(avatarDir, { recursive: true });
 
   const { analyzeTopic } = await server.ssrLoadModule('/services/sophiaService.ts');
+
+  if (providerOverride) {
+    const sophiaConfig = await server.ssrLoadModule('/services/sophiaConfig.ts');
+    sophiaConfig.updateSettings({ activeProviderId: providerOverride });
+    const resolved = sophiaConfig.getActiveConfig();
+    console.log(`Provider override: ${providerOverride} → text model "${resolved.apiModel}", avatar model "${resolved.avatarImageModel}"`);
+  }
+
   console.log(`Generating full-chain reference sample for: ${topic}`);
 
   const result = await analyzeTopic(topic, {

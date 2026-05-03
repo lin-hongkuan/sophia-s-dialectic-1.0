@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Settings as SettingsIcon, Sparkles, ShieldAlert, Database, Cpu, FileText, Sliders, BarChart3, Plug, RotateCcw, Download, Upload, Trash2, Check, AlertTriangle } from 'lucide-react';
+import { Settings as SettingsIcon, Sparkles, ShieldAlert, Database, Cpu, FileText, Sliders, BarChart3, Plug, RotateCcw, Download, Upload, Trash2, Check, AlertTriangle, Image as ImageIcon, Copy } from 'lucide-react';
 import {
   CustomProvider,
   ProviderId,
@@ -14,10 +14,18 @@ import {
 } from '../services/sophiaConfig';
 import { MODEL_PRESETS, ModelPreset } from '../services/modelPresets';
 import {
+  AVATAR_STYLE_PRESETS,
+  AvatarStylePreset,
+  DEFAULT_AVATAR_STYLE_PRESET_ID,
   DEFAULT_OUTLINE_SYSTEM_PROMPT,
   DEFAULT_SYNTHESIS_SYSTEM_PROMPT,
+  DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT,
   DEFAULT_VOICE_SYSTEM_PROMPT,
+  HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
+  HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT,
+  NEGATIVE_AVATAR_PROMPT,
   PromptOverrides,
+  THOUGHT_VOICE_AVATAR_STYLE,
 } from '../services/prompts';
 import {
   UsageTotals,
@@ -26,12 +34,13 @@ import {
   getTotals,
 } from '../services/tokenAccounting';
 import { STAGE_LABEL } from '../constants';
+import { PageHero } from './PageHero';
 
 interface SettingsPageProps {
   onBack: () => void;
 }
 
-type SectionId = 'provider' | 'prompts' | 'options' | 'tokens' | 'data';
+type SectionId = 'provider' | 'prompts' | 'avatars' | 'options' | 'tokens' | 'data';
 
 interface PromptDef {
   key: keyof PromptOverrides;
@@ -59,6 +68,51 @@ const PROMPT_DEFS: PromptDef[] = [
     description: '声音之间的张力、关键词、综合结论的生成。',
     defaultText: DEFAULT_SYNTHESIS_SYSTEM_PROMPT,
   },
+  {
+    key: 'topicReframeSystem',
+    label: '问题转译（topic reframe）',
+    description: '判断用户输入是否需要转译，以及生成 3 个候选哲学化标题的规则。',
+    defaultText: DEFAULT_TOPIC_REFRAME_SYSTEM_PROMPT,
+  },
+];
+
+interface AvatarPromptDef {
+  key: keyof PromptOverrides;
+  label: string;
+  description: string;
+  defaultText: string;
+  presetField: keyof Pick<AvatarStylePreset, 'thoughtVoice' | 'historicalPhilosopher' | 'negative' | 'historicalPhilosopherNegative'>;
+}
+
+const AVATAR_PROMPT_DEFS: AvatarPromptDef[] = [
+  {
+    key: 'thoughtVoiceAvatarStyle',
+    label: '思想声音头像风格',
+    description: '所有非历史哲学家头像的视觉风格描述（思想流派 / 概念 / 立场 / 当代批评者）。',
+    defaultText: THOUGHT_VOICE_AVATAR_STYLE,
+    presetField: 'thoughtVoice',
+  },
+  {
+    key: 'historicalPhilosopherAvatarStyle',
+    label: '历史哲学家头像风格',
+    description: '当声音是真实历史哲学家时使用的视觉风格。通常需要更写实、更尊重时代特征。',
+    defaultText: HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
+    presetField: 'historicalPhilosopher',
+  },
+  {
+    key: 'negativeAvatarPrompt',
+    label: '思想声音负向提示',
+    description: '附加在思想声音头像 prompt 末尾，告诉模型应避免什么（文字、水印、变形等）。',
+    defaultText: NEGATIVE_AVATAR_PROMPT,
+    presetField: 'negative',
+  },
+  {
+    key: 'historicalPhilosopherNegativeAvatarPrompt',
+    label: '历史哲学家负向提示',
+    description: '附加在历史哲学家头像 prompt 末尾的负向约束。',
+    defaultText: HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT,
+    presetField: 'historicalPhilosopherNegative',
+  },
 ];
 
 type TestConnectionState =
@@ -73,6 +127,8 @@ const formatNumber = (value: number): string => {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
   return String(value);
 };
+
+const lineCount = (value: string): number => value ? value.split(/\r\n|\r|\n/).length : 0;
 
 const downloadBlob = (filename: string, mime: string, content: string) => {
   if (typeof window === 'undefined') return;
@@ -156,7 +212,7 @@ const Bar: React.FC<{ label: string; value: number; total: number; subtitle?: st
   );
 };
 
-const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
+const SettingsPage: React.FC<SettingsPageProps> = () => {
   const [settings, setSettingsState] = useState<SophiaSettings>(() => getSettings());
   const [active, setActive] = useState<SectionId>('provider');
   const [testState, setTestState] = useState<TestConnectionState>({ status: 'idle' });
@@ -164,6 +220,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [copiedPromptKey, setCopiedPromptKey] = useState<keyof PromptOverrides | null>(null);
+  const [activePromptKey, setActivePromptKey] = useState<keyof PromptOverrides>(PROMPT_DEFS[0].key);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -202,15 +260,93 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   };
 
   const handlePromptChange = (key: keyof PromptOverrides, value: string) => {
-    updateSettings((current) => ({
-      promptOverrides: { ...current.promptOverrides, [key]: value },
-    }));
+    updateSettings((current) => {
+      const next = { ...current.promptOverrides };
+      if (value.length === 0) delete next[key];
+      else next[key] = value;
+      return { promptOverrides: next };
+    });
   };
 
   const handleResetPrompt = (key: keyof PromptOverrides) => {
     updateSettings((current) => {
       const next = { ...current.promptOverrides };
       delete next[key];
+      return { promptOverrides: next };
+    });
+  };
+
+  const handleResetAllCorePrompts = () => {
+    updateSettings((current) => {
+      const next = { ...current.promptOverrides };
+      PROMPT_DEFS.forEach((def) => {
+        delete next[def.key];
+      });
+      return { promptOverrides: next };
+    });
+  };
+
+  const handleCopyDefaultPrompt = async (def: PromptDef) => {
+    try {
+      await navigator.clipboard.writeText(def.defaultText);
+      setCopiedPromptKey(def.key);
+      window.setTimeout(() => setCopiedPromptKey((current) => current === def.key ? null : current), 1400);
+    } catch {
+      setCopiedPromptKey(null);
+    }
+  };
+
+  /**
+   * Detect which avatar preset (if any) the current overrides correspond to.
+   *
+   * A preset matches when, for every avatar field, the current value is either
+   * absent (= falls back to default) or equal to the preset's bundled string.
+   * The default 'museum' preset wins when nothing is overridden, since its
+   * bundle is identical to the project defaults.
+   */
+  const activeAvatarPresetId = useMemo<string | null>(() => {
+    const po = settings.promptOverrides;
+    const fieldFor = (preset: AvatarStylePreset, def: AvatarPromptDef): string => preset[def.presetField];
+    const matches = AVATAR_STYLE_PRESETS.find((preset) =>
+      AVATAR_PROMPT_DEFS.every((def) => {
+        const current = po[def.key];
+        const expected = fieldFor(preset, def);
+        // Empty / undefined override means we're using the project default,
+        // which equals the museum preset for these four fields.
+        if (!current || !current.trim()) return expected === def.defaultText;
+        return current === expected;
+      }),
+    );
+    return matches?.id ?? null;
+  }, [settings.promptOverrides]);
+
+  const handleApplyAvatarPreset = (preset: AvatarStylePreset) => {
+    updateSettings((current) => {
+      const next = { ...current.promptOverrides };
+      if (preset.id === DEFAULT_AVATAR_STYLE_PRESET_ID) {
+        // Default preset == project defaults; clear overrides so the underlying
+        // constants apply (and exported settings stay clean).
+        delete next.thoughtVoiceAvatarStyle;
+        delete next.historicalPhilosopherAvatarStyle;
+        delete next.negativeAvatarPrompt;
+        delete next.historicalPhilosopherNegativeAvatarPrompt;
+      } else {
+        next.thoughtVoiceAvatarStyle = preset.thoughtVoice;
+        next.historicalPhilosopherAvatarStyle = preset.historicalPhilosopher;
+        next.negativeAvatarPrompt = preset.negative;
+        next.historicalPhilosopherNegativeAvatarPrompt = preset.historicalPhilosopherNegative;
+      }
+      return { promptOverrides: next };
+    });
+  };
+
+  const handleResetAllAvatarPrompts = () => {
+    updateSettings((current) => {
+      const next = { ...current.promptOverrides };
+      delete next.thoughtVoiceAvatarStyle;
+      delete next.historicalPhilosopherAvatarStyle;
+      delete next.negativeAvatarPrompt;
+      delete next.historicalPhilosopherNegativeAvatarPrompt;
       return { promptOverrides: next };
     });
   };
@@ -308,6 +444,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   const sections: Array<{ id: SectionId; label: string; icon: React.ReactNode }> = [
     { id: 'provider', label: '生成模型', icon: <Cpu className="h-3.5 w-3.5" /> },
     { id: 'prompts', label: '提示词', icon: <FileText className="h-3.5 w-3.5" /> },
+    { id: 'avatars', label: '头像风格', icon: <ImageIcon className="h-3.5 w-3.5" /> },
     { id: 'options', label: '运行参数', icon: <Sliders className="h-3.5 w-3.5" /> },
     { id: 'tokens', label: 'Token 预算', icon: <BarChart3 className="h-3.5 w-3.5" /> },
     { id: 'data', label: '数据管理', icon: <Database className="h-3.5 w-3.5" /> },
@@ -322,23 +459,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   const approxRuns = allTimeTotal > 0 ? Math.max(1, Math.round(allTimeTotal / 25000)) : 0;
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 md:pb-28 animate-fade-in -mt-2 md:-mt-4 text-museum-900">
-      <div className="pt-6 md:pt-10">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-2 rounded-full border border-museum-200/80 bg-white/60 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest text-museum-600 transition hover:bg-white"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          返回首页
-        </button>
-        <div className="mt-6 flex items-center gap-3">
-          <SettingsIcon className="h-5 w-5 text-museum-700" />
-          <h1 className="font-serif text-4xl text-museum-900 md:text-5xl">设置</h1>
-        </div>
-        <p className="mt-2 max-w-3xl text-[14px] leading-relaxed text-museum-600">
-          所有设置仅保存在你的浏览器本地（localStorage），切换后立即生效，不需要刷新或重新部署。
-        </p>
-      </div>
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 md:pb-28 animate-fade-in -mt-4 md:-mt-12 text-museum-900">
+      <PageHero
+        eyebrow="Local Console"
+        accent="Settings"
+        icon={<SettingsIcon className="h-3.5 w-3.5" />}
+        description="在你的浏览器里调谐 Sophia 的模型、提示词、头像与运行参数。改动会立即对下一次生成生效，不需要刷新或重新部署。"
+      />
 
       <nav className="sticky top-0 z-10 -mx-4 mt-6 flex gap-2 overflow-x-auto bg-museum-50/85 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-full sm:border sm:border-museum-200/80 sm:px-2">
         {sections.map((section) => (
@@ -395,13 +522,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
                   />
                 </label>
                 <label className="block">
-                  <span className="text-[11px] font-mono uppercase tracking-widest text-museum-500">模型名（model）</span>
+                  <span className="text-[11px] font-mono uppercase tracking-widest text-museum-500">文本模型名（model）</span>
                   <input
                     type="text"
                     value={settings.customProvider.textModel}
                     onChange={(e) => handleCustomChange({ textModel: e.target.value })}
                     className="mt-1 w-full rounded border border-museum-200 bg-white px-3 py-2 font-mono text-sm focus:border-museum-700 focus:outline-none"
                     placeholder="gpt-4o-mini"
+                  />
+                </label>
+                <label className="block md:col-span-2">
+                  <span className="text-[11px] font-mono uppercase tracking-widest text-museum-500">生图模型名（Image model）</span>
+                  <input
+                    type="text"
+                    value={settings.customProvider.imageModel ?? ''}
+                    onChange={(e) => handleCustomChange({ imageModel: e.target.value })}
+                    className="mt-1 w-full rounded border border-museum-200 bg-white px-3 py-2 font-mono text-sm focus:border-museum-700 focus:outline-none"
+                    placeholder="grok-imagine-image-lite"
                   />
                 </label>
                 <label className="block md:col-span-2">
@@ -459,53 +596,254 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
         </section>
       )}
 
-      {active === 'prompts' && (
-        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
-          <SectionHeader
-            icon={<FileText className="h-4 w-4" />}
-            title="提示词编辑"
-            description="覆盖 Sophia 的三个主要 system prompt。留空 = 使用项目内置默认值。"
-          />
-          <div className="space-y-5">
-            {PROMPT_DEFS.map((def) => {
-              const value = settings.promptOverrides[def.key] ?? '';
-              const isCustom = !!(value && value.trim());
-              return (
-                <details key={def.key} className="group rounded-lg border border-museum-200 bg-museum-50/40 px-4 py-3 open:bg-white/70" open={isCustom}>
-                  <summary className="flex cursor-pointer items-center justify-between gap-3 text-left">
-                    <div>
-                      <p className="font-serif text-base text-museum-900">{def.label}</p>
-                      <p className="text-[12px] text-museum-600">{def.description}</p>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-mono tracking-widest ${
-                      isCustom ? 'border-museum-700 bg-museum-900 text-museum-50' : 'border-museum-200 text-museum-500'
-                    }`}>
-                      {isCustom ? '已覆盖' : '默认'}
-                    </span>
+      {active === 'prompts' && (() => {
+        const activeDef = PROMPT_DEFS.find((def) => def.key === activePromptKey) || PROMPT_DEFS[0];
+        const activeValue = settings.promptOverrides[activeDef.key] ?? '';
+        const activeHasOverride = !!activeValue.trim();
+        const activeEffective = activeHasOverride ? activeValue : activeDef.defaultText;
+        const overrideCount = PROMPT_DEFS.reduce((sum, def) => {
+          const v = settings.promptOverrides[def.key];
+          return v && v.trim() ? sum + 1 : sum;
+        }, 0);
+        return (
+          <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-4 sm:p-5 flex flex-col">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between pb-4 border-b border-museum-200/60">
+              <SectionHeader
+                icon={<FileText className="h-4 w-4" />}
+                title="系统提示词"
+                description="Sophia 的 4 个核心 system prompt。修改将改变分析路径、写作风格及判定逻辑。"
+              />
+              <div className="flex shrink-0 items-center justify-end gap-2 mt-2 md:mt-0">
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest ${
+                  overrideCount > 0
+                    ? 'border-museum-700 bg-museum-900 text-museum-50'
+                    : 'border-museum-200 bg-museum-50 text-museum-500'
+                }`}>
+                  {overrideCount > 0 ? `${overrideCount}/${PROMPT_DEFS.length} 已覆盖` : '全部默认'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetAllCorePrompts}
+                  disabled={overrideCount === 0}
+                  className="inline-flex items-center justify-center gap-1.5 rounded border border-museum-200 bg-white/70 px-3 py-1.5 text-[11px] text-museum-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  全恢默认
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col md:flex-row gap-4">
+              {/* Sidebar List */}
+              <div className="w-full md:w-1/4 lg:w-1/3 flex flex-col gap-1.5">
+                {PROMPT_DEFS.map((def) => {
+                  const isActive = def.key === activePromptKey;
+                  const v = settings.promptOverrides[def.key] ?? '';
+                  const hasOverride = !!v.trim();
+                  return (
+                    <button
+                      key={def.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setActivePromptKey(def.key)}
+                      className={`relative flex flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition ${
+                        isActive
+                          ? 'border-museum-500 bg-museum-50 shadow-sm'
+                          : 'border-transparent bg-transparent hover:bg-museum-50/50'
+                      }`}
+                    >
+                      <div className="flex w-full items-center justify-between">
+                        <span className={`text-[12px] font-bold ${isActive ? 'text-museum-900' : 'text-museum-700'}`}>
+                          {def.label}
+                        </span>
+                        {hasOverride && (
+                          <span
+                            className="inline-block h-1.5 w-1.5 rounded-full bg-amber-600"
+                            title="已覆盖"
+                          />
+                        )}
+                      </div>
+                      <span className={`text-[10px] leading-snug ${isActive ? 'text-museum-700' : 'text-museum-500 line-clamp-2'}`}>
+                        {def.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Editor Pane */}
+              <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <h3 className="font-serif text-base text-museum-900">{activeDef.label}</h3>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePromptChange(activeDef.key, activeDef.defaultText)}
+                      className="inline-flex items-center gap-1 rounded border border-museum-200 bg-white/60 px-2 py-0.5 text-[10px] uppercase font-mono tracking-widest text-museum-600 transition hover:bg-white hover:text-museum-900"
+                    >
+                      <FileText className="h-3 w-3" />
+                      填入默认
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyDefaultPrompt(activeDef)}
+                      className="inline-flex items-center gap-1 rounded border border-museum-200 bg-white/60 px-2 py-0.5 text-[10px] uppercase font-mono tracking-widest text-museum-600 transition hover:bg-white hover:text-museum-900"
+                    >
+                      <Copy className="h-3 w-3" />
+                      {copiedPromptKey === activeDef.key ? '已复制' : '复制默认'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleResetPrompt(activeDef.key)}
+                      disabled={!activeHasOverride}
+                      className="inline-flex items-center gap-1 rounded border border-museum-200 bg-white/60 px-2 py-0.5 text-[10px] uppercase font-mono tracking-widest transition hover:bg-red-50 hover:border-red-200 hover:text-red-700 text-museum-600 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      清空(用默认)
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  value={activeValue}
+                  onChange={(event) => handlePromptChange(activeDef.key, event.target.value)}
+                  rows={14}
+                  spellCheck={false}
+                  placeholder={`留空 = 使用系统默认。\n\n默认内容（${activeDef.defaultText.length} 字符 / ${lineCount(activeDef.defaultText)} 行）:\n${activeDef.defaultText.slice(0, 100)}...`}
+                  className="w-full flex-1 resize-y rounded-lg border border-museum-200 bg-white/70 px-3 py-3 font-mono text-[11px] leading-relaxed text-museum-900 shadow-sm placeholder:text-museum-400 focus:border-museum-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-museum-500"
+                />
+
+                <div className="mt-2 px-1 flex flex-wrap items-center justify-between gap-2 text-[10px] tracking-widest uppercase font-mono text-museum-500">
+                  <div className="flex items-center gap-2">
+                    <span>生效: {activeEffective.length} 字符 / {lineCount(activeEffective)} 行</span>
+                    {activeHasOverride && (
+                      <span className="rounded bg-amber-100/80 px-1.5 py-0.5 text-amber-800">
+                        自定义生效中
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <details className="mt-3 group">
+                  <summary className="cursor-pointer inline-flex items-center gap-1.5 px-1 text-[10px] font-mono uppercase tracking-widest text-museum-500 hover:text-museum-800 transition">
+                    <span className="group-open:hidden">▶ 展开默认提示词对照</span>
+                    <span className="hidden group-open:inline">▼ 收起默认提示词对照</span>
                   </summary>
-                  <div className="mt-3">
-                    <textarea
-                      value={value || def.defaultText}
-                      onChange={(e) => handlePromptChange(def.key, e.target.value)}
-                      rows={10}
-                      spellCheck={false}
-                      className="w-full rounded border border-museum-200 bg-white px-3 py-2 font-mono text-[12px] leading-relaxed focus:border-museum-700 focus:outline-none"
-                    />
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-museum-500">
-                      <span>{(value || def.defaultText).length} 字符</span>
-                      <button
-                        type="button"
-                        onClick={() => handleResetPrompt(def.key)}
-                        className="inline-flex items-center gap-1 rounded border border-museum-200 px-2 py-1 hover:bg-museum-100"
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        恢复默认
-                      </button>
-                    </div>
+                  <div className="mt-1.5 rounded-lg border border-museum-200 bg-museum-50/40 p-3">
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-museum-600">
+                      {activeDef.defaultText}
+                    </pre>
                   </div>
                 </details>
-              );
-            })}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
+      {active === 'avatars' && (
+        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
+          <SectionHeader
+            icon={<ImageIcon className="h-4 w-4" />}
+            title="头像风格"
+            description="思想声音卡片上的肖像视觉风格。先一键选预设，再到下方按需精调。改动会立即对下一次生成的头像生效，已生成的旧头像不会被替换。"
+          />
+
+          <div>
+            <h3 className="text-[11px] font-mono uppercase tracking-widest text-museum-500">一键预设</h3>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {AVATAR_STYLE_PRESETS.map((preset) => {
+                const isActive = activeAvatarPresetId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleApplyAvatarPreset(preset)}
+                    aria-pressed={isActive}
+                    className={`relative flex flex-col rounded-lg border px-4 py-3 text-left transition ${
+                      isActive
+                        ? 'border-museum-700 bg-museum-900 text-museum-50 shadow'
+                        : 'border-museum-200 bg-white/70 text-museum-800 hover:border-museum-400 hover:bg-white'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-mono uppercase tracking-widest ${isActive ? 'text-museum-200' : 'text-museum-500'}`}>
+                      {preset.id === DEFAULT_AVATAR_STYLE_PRESET_ID ? 'Default' : 'Preset'}
+                    </span>
+                    <span className="mt-1 font-serif text-base">{preset.label}</span>
+                    <span className={`mt-1 text-[11px] leading-snug ${isActive ? 'text-museum-200' : 'text-museum-500'}`}>
+                      {preset.description}
+                    </span>
+                    {isActive && (
+                      <span className="absolute right-3 top-3 inline-flex h-4 w-4 items-center justify-center rounded-full bg-museum-50 text-museum-900">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {activeAvatarPresetId === null && (
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-[11px] text-amber-800">
+                <Sparkles className="h-3 w-3" />
+                当前为自定义组合，未匹配任何预设。
+              </p>
+            )}
+          </div>
+
+          <div className="mt-7 border-t border-museum-200 pt-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h3 className="text-[11px] font-mono uppercase tracking-widest text-museum-500">精调（覆盖具体字段）</h3>
+              <button
+                type="button"
+                onClick={handleResetAllAvatarPrompts}
+                className="inline-flex items-center gap-1 rounded border border-museum-200 px-2 py-1 text-[11px] text-museum-600 hover:bg-museum-100"
+              >
+                <RotateCcw className="h-3 w-3" />
+                全部恢复默认
+              </button>
+            </div>
+            <div className="mt-4 space-y-5">
+              {AVATAR_PROMPT_DEFS.map((def) => {
+                const value = settings.promptOverrides[def.key] ?? '';
+                const isCustom = !!(value && value.trim());
+                return (
+                  <details key={def.key} className="group rounded-lg border border-museum-200 bg-museum-50/40 px-4 py-3 open:bg-white/70" open={isCustom}>
+                    <summary className="flex cursor-pointer items-center justify-between gap-3 text-left">
+                      <div>
+                        <p className="font-serif text-base text-museum-900">{def.label}</p>
+                        <p className="text-[12px] text-museum-600">{def.description}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-mono tracking-widest ${
+                        isCustom ? 'border-museum-700 bg-museum-900 text-museum-50' : 'border-museum-200 text-museum-500'
+                      }`}>
+                        {isCustom ? '已覆盖' : '默认'}
+                      </span>
+                    </summary>
+                    <div className="mt-3">
+                      <textarea
+                        value={value || def.defaultText}
+                        onChange={(e) => handlePromptChange(def.key, e.target.value)}
+                        rows={5}
+                        spellCheck={false}
+                        className="w-full rounded border border-museum-200 bg-white px-3 py-2 font-mono text-[12px] leading-relaxed focus:border-museum-700 focus:outline-none"
+                      />
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-museum-500">
+                        <span>{(value || def.defaultText).length} 字符</span>
+                        <button
+                          type="button"
+                          onClick={() => handleResetPrompt(def.key)}
+                          className="inline-flex items-center gap-1 rounded border border-museum-200 px-2 py-1 hover:bg-museum-100"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          恢复默认
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
@@ -734,10 +1072,21 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
         </section>
       )}
 
-      <p className="mt-10 inline-flex items-center gap-1.5 rounded-full border border-museum-200 bg-white/40 px-3 py-1 text-[10px] font-mono uppercase tracking-widest text-museum-500">
-        <Sparkles className="h-3 w-3" />
-        改动会立即对下一次生成生效
-      </p>
+      <footer className="mt-12 border-t border-museum-200/80 pt-6">
+        <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3 text-left">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-museum-500" />
+            <p className="text-[12px] leading-relaxed text-museum-600">
+              所有设置仅保存在你的浏览器本地（<span className="font-mono">localStorage</span>）。
+              自定义 LLM 的 API Key 以明文存放，导出 settings.json 也包含此 key —— 请勿在公共设备或聊天记录中传播。
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-museum-200 bg-white/40 px-3 py-1 text-[10px] font-mono uppercase tracking-widest text-museum-500 shrink-0">
+            <Sparkles className="h-3 w-3" />
+            改动会立即对下一次生成生效
+          </span>
+        </div>
+      </footer>
     </div>
   );
 };

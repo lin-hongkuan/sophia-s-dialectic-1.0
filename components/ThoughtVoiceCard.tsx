@@ -307,7 +307,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
           </div>
         </div>
 
-        <p className="mt-4 md:mt-6 border-l border-museum-300/90 pl-3 md:pl-4 text-base md:text-xl font-serif italic text-museum-700 leading-relaxed">
+        <p className="mt-4 md:mt-6 border-l border-museum-300/90 pl-3 md:pl-4 text-base md:text-xl font-serif font-light text-museum-700 leading-loose tracking-wide">
           {data.oneLine || data.stance || data.coreConcept}
         </p>
       </div>
@@ -319,7 +319,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
             <span className="h-px w-7 bg-museum-300" aria-hidden="true" />
             引文
           </div>
-          <blockquote className="relative border-l border-museum-300/80 pl-4 font-serif text-lg italic text-museum-900 leading-relaxed">
+          <blockquote className="relative border-l border-museum-300/80 pl-4 font-serif text-lg font-light text-museum-900 leading-loose tracking-wide">
             <span>「{normalizedQuote}」</span>
           </blockquote>
         </figure>
@@ -395,7 +395,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
               className="relative overflow-hidden transition-[height] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
               style={{ height: `${visibleContentHeight}px` }}
             >
-              <div ref={contentRef} className="px-0 md:px-3 pt-1 md:pt-2 pb-8 md:pb-10 prose prose-stone md:prose-xl max-w-none text-museum-800 leading-relaxed md:leading-loose md:text-justify whitespace-pre-line">
+              <div ref={contentRef} className="px-0 md:px-3 pt-1 md:pt-2 pb-8 md:pb-10 prose prose-stone max-w-none text-museum-800 leading-relaxed md:leading-loose md:text-justify whitespace-pre-line">
                 <span className="md:first-letter:text-7xl md:first-letter:font-bold md:first-letter:text-museum-900 md:first-letter:mr-3 md:first-letter:float-left md:first-letter:font-serif">
                   {data.argument}
                 </span>
@@ -437,7 +437,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
             <span className="h-px w-7 bg-museum-300" aria-hidden="true" />
             引文
           </div>
-          <blockquote className="relative pr-5 text-base md:text-xl font-serif italic text-museum-900 leading-relaxed">「{normalizedQuote}」</blockquote>
+          <blockquote className="relative pr-5 text-base md:text-xl font-serif font-light text-museum-900 leading-loose tracking-wide">「{normalizedQuote}」</blockquote>
         </figure>
       )}
     </section>

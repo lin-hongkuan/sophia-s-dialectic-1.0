@@ -22,6 +22,7 @@ export interface CustomProvider {
   baseUrl: string;
   apiKey: string;
   textModel: string;
+  imageModel: string;
 }
 
 export interface RuntimeOptions {
@@ -65,6 +66,7 @@ const DEFAULT_CUSTOM_PROVIDER: CustomProvider = {
   baseUrl: process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1',
   apiKey: '',
   textModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
+  imageModel: process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite',
 };
 
 export const DEFAULT_SETTINGS: SophiaSettings = {
@@ -117,6 +119,7 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
       baseUrl: typeof cp.baseUrl === 'string' ? cp.baseUrl : merged.customProvider.baseUrl,
       apiKey: typeof cp.apiKey === 'string' ? cp.apiKey : merged.customProvider.apiKey,
       textModel: typeof cp.textModel === 'string' ? cp.textModel : merged.customProvider.textModel,
+      imageModel: typeof cp.imageModel === 'string' ? cp.imageModel : merged.customProvider.imageModel,
     };
   }
 
@@ -126,6 +129,11 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
       outlineSystem: typeof po.outlineSystem === 'string' ? po.outlineSystem : undefined,
       voiceSystem: typeof po.voiceSystem === 'string' ? po.voiceSystem : undefined,
       synthesisSystem: typeof po.synthesisSystem === 'string' ? po.synthesisSystem : undefined,
+      topicReframeSystem: typeof po.topicReframeSystem === 'string' ? po.topicReframeSystem : undefined,
+      thoughtVoiceAvatarStyle: typeof po.thoughtVoiceAvatarStyle === 'string' ? po.thoughtVoiceAvatarStyle : undefined,
+      historicalPhilosopherAvatarStyle: typeof po.historicalPhilosopherAvatarStyle === 'string' ? po.historicalPhilosopherAvatarStyle : undefined,
+      negativeAvatarPrompt: typeof po.negativeAvatarPrompt === 'string' ? po.negativeAvatarPrompt : undefined,
+      historicalPhilosopherNegativeAvatarPrompt: typeof po.historicalPhilosopherNegativeAvatarPrompt === 'string' ? po.historicalPhilosopherNegativeAvatarPrompt : undefined,
     };
   }
 
@@ -242,7 +250,7 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
       apiBaseUrl: (cp.baseUrl || ENV_BASELINE.apiBaseUrl).replace(/\/$/, ''),
       apiModel: cp.textModel || ENV_BASELINE.apiModel,
       apiProvider: ENV_BASELINE.apiProvider,
-      avatarImageModel: ENV_BASELINE.avatarImageModel,
+      avatarImageModel: cp.imageModel || ENV_BASELINE.avatarImageModel,
       avatarImageSize: ENV_BASELINE.avatarImageSize,
       avatarAspectHint: ENV_BASELINE.avatarAspectHint,
       promptOverrides: settings.promptOverrides,
@@ -257,7 +265,7 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
     apiBaseUrl: ENV_BASELINE.apiBaseUrl,
     apiModel: presetModel || ENV_BASELINE.apiModel,
     apiProvider: ENV_BASELINE.apiProvider,
-    avatarImageModel: ENV_BASELINE.avatarImageModel,
+    avatarImageModel: settings.customProvider.imageModel || ENV_BASELINE.avatarImageModel,
     avatarImageSize: ENV_BASELINE.avatarImageSize,
     avatarAspectHint: ENV_BASELINE.avatarAspectHint,
     promptOverrides: settings.promptOverrides,

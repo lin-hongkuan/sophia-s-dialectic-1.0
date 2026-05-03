@@ -12,8 +12,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        serif: ['"Playfair Display"', 'serif'],
-        sans: ['Inter', 'sans-serif'],
+        serif: ['"Playfair Display"', 'Georgia', '"Noto Serif SC"', '"Songti SC"', '"STSong"', '"SimSun"', 'serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Noto Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
       },
       colors: {
         museum: {

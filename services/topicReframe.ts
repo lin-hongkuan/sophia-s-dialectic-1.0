@@ -75,7 +75,7 @@ export const reframeUserTopic = async (rawTopic: string): Promise<TopicReframeRe
         max_tokens: 700,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: resolveTopicReframeSystemPrompt() },
+          { role: 'system', content: resolveTopicReframeSystemPrompt(cfg.promptOverrides) },
           { role: 'user', content: `用户输入：${trimmed}` },
         ],
       }),

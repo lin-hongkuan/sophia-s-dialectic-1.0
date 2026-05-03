@@ -37,14 +37,14 @@ export const MODEL_PRESETS: ModelPreset[] = [
     label: 'MiMo',
     modelName: presetMimoModel,
     configured: presetMimoModel.length > 0,
-    hint: '请在 GitHub Variables 中设置 SOPHIA_PRESET_MIMO_MODEL 后重新部署。',
+    hint: '请在 GitHub Variables 中设置 SOPHIA_PRESET_MIMO_MODEL（或 .env.local）后重新部署。',
   },
   {
     id: 'preset:grok',
     label: 'Grok',
     modelName: presetGrokModel,
     configured: presetGrokModel.length > 0,
-    hint: '请在 GitHub Variables 中设置 SOPHIA_PRESET_GROK_MODEL 后重新部署。',
+    hint: '请在 GitHub Variables 中设置 SOPHIA_PRESET_GROK_MODEL（或 .env.local）后重新部署。',
   },
 ];
 

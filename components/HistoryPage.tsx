@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { ActiveAnalysisRun, HistoryEntry } from '../types';
-import { AlertCircle, Archive, ArrowRight, BookOpen, CheckCircle2, Clock, Download, Loader2, RotateCcw, Sparkles, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, Archive, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, Clock, Download, Loader2, Quote, RotateCcw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import { PageHero } from './PageHero';
 
 interface HistoryPageProps {
   entries: HistoryEntry[];
@@ -72,59 +73,12 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 pb-16 md:pb-20 animate-fade-in -mt-4 md:-mt-12">
-      <div className="relative mx-auto max-w-4xl py-7 text-center md:py-14">
-        <div className="absolute left-1/2 top-0 hidden h-28 w-px -translate-x-1/2 bg-museum-300/80 md:block" />
-        <div
-          className="notranslate relative z-10 mb-5 mt-10 inline-flex h-8 select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8 md:mt-12"
-          translate="no"
-        >
-          <Archive className="mr-2 h-3.5 w-3.5 text-museum-600" />
-          <span className="whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">Archive of Questions</span>
-        </div>
-        <h1 className="font-serif text-4xl leading-[0.92] tracking-tight text-museum-900 drop-shadow-sm sm:text-7xl md:text-8xl">
-          Sophia's<br />
-          <span className="relative inline-block italic">
-            History
-            <svg className="absolute -bottom-1 -left-[5%] h-2 w-[110%] text-museum-300/50 md:-bottom-2 md:h-4" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M0 5 Q 50 12 100 5" stroke="currentColor" strokeWidth="2" fill="none" />
-            </svg>
-          </span>
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl px-2 text-sm leading-relaxed text-museum-700 md:mt-8 md:text-base">
-          这里保存你每次提问生成的完整结果页。正在生成的问题也会临时出现在这里，方便你离开后再回来。
-        </p>
-        <div className="mx-auto mt-6 max-w-3xl rounded-xl border border-museum-200 bg-white/75 p-4 shadow-sm backdrop-blur-md md:mt-8 md:p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="text-left">
-              <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-museum-400">Archive Toolkit</p>
-              <p className="mt-2 text-sm leading-relaxed text-museum-700">下载或导入本地历史记录；删除操作只影响当前浏览器里的档案。</p>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => {
-                  onDownloadHistory?.();
-                  setArchiveMessage(userEntries.length > 0 ? '已开始下载历史备份。' : '当前没有可下载的用户历史。');
-                }}
-                disabled={!onDownloadHistory || userEntries.length === 0}
-                className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/80 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Download className="h-3.5 w-3.5" /> 下载 JSON
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!onImportHistory}
-                className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/80 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Upload className="h-3.5 w-3.5" /> 导入 JSON
-              </button>
-            </div>
-          </div>
-          <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
-          {archiveMessage && <p className="mt-3 text-left text-xs leading-relaxed text-museum-500">{archiveMessage}</p>}
-        </div>
-      </div>
+      <PageHero
+        eyebrow="Archive of Questions"
+        accent="History"
+        icon={<Archive className="h-3.5 w-3.5" />}
+        description="这里保存你每次提问生成的完整结果页。正在生成的问题也会临时出现在这里，方便你离开后再回来。"
+      />
 
       {activeRun && (
         <button
@@ -166,37 +120,68 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {entries.map((entry) => (
-            <div key={entry.id} className="relative bg-white/85 backdrop-blur-sm border border-museum-200 rounded-xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-7">
+          {entries.map((entry, index) => {
+            const catalogNo = String(entries.length - index).padStart(3, '0');
+            const voiceCount = entry.result?.voices?.length ?? 0;
+            return (
+            <div
+              key={entry.id}
+              className="group relative isolate overflow-hidden rounded-xl border border-museum-200/80 bg-white/85 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset,0_1px_2px_rgba(44,42,38,0.04)] backdrop-blur-sm transition-all duration-500 ease-out hover:-translate-y-1 hover:border-museum-300 hover:shadow-[0_1px_0_rgba(255,255,255,0.7)_inset,0_18px_36px_-18px_rgba(44,42,38,0.28)]"
+            >
+              <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-px bg-museum-200/80 transition-colors duration-500 group-hover:bg-museum-800/70" />
+              <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-museum-200/70 to-transparent" />
+              <span aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-museum-50/0 via-transparent to-museum-100/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100 group-hover:from-museum-50/40 group-hover:to-museum-100/60" />
+
               <a
                 href={entryHref?.(entry) || '/history'}
                 onClick={(event) => {
                   event.preventDefault();
                   onOpen(entry);
                 }}
-                className="block w-full text-left p-5 md:p-8"
+                className="block w-full text-left p-5 md:p-7"
               >
-                <div className="flex items-start justify-between gap-4 mb-6">
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-[10px] uppercase tracking-widest text-museum-800 bg-museum-100 px-3 py-1 rounded-sm font-semibold border border-museum-200">
-                      {entry.modeLabel}
-                    </span>
-                    {entry.isPreset && (
-                      <span className="text-[10px] uppercase tracking-widest text-amber-800 bg-amber-50 px-3 py-1 rounded-sm font-semibold border border-amber-100 inline-flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" /> {entry.generatedByChain ? '真实链路生成' : '参考样本'}
-                      </span>
-                    )}
-                  </div>
-                  <BookOpen className="w-5 h-5 text-museum-300 group-hover:text-museum-900 transition-colors" />
+                <div className="flex items-start justify-between gap-4">
+                  <span className="notranslate font-mono text-[10px] uppercase leading-none tracking-[0.22em] text-museum-400" translate="no">
+                    NO. {catalogNo}
+                  </span>
+                  <ArrowUpRight className="h-4 w-4 text-museum-300 transition-all duration-500 ease-out group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-museum-900" />
                 </div>
-                <h2 className="font-serif text-xl md:text-3xl text-museum-900 leading-tight mb-3 md:mb-4 group-hover:underline break-words">
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-sm border border-museum-200 bg-museum-100/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-museum-800">
+                    {entry.modeLabel}
+                  </span>
+                  {entry.isPreset && (
+                    <span className="inline-flex items-center gap-1 rounded-sm border border-amber-100 bg-amber-50/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-amber-800">
+                      <Sparkles className="h-3 w-3" /> {entry.generatedByChain ? '真实链路生成' : '参考样本'}
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="mt-5 font-serif text-xl leading-tight text-museum-900 break-words decoration-museum-300/80 underline-offset-[6px] transition-all duration-500 group-hover:decoration-museum-800 group-hover:underline md:mt-6 md:text-3xl">
                   {entry.title}
                 </h2>
-                <p className="text-sm md:text-base text-museum-600 leading-relaxed mb-5 md:mb-6 break-words">{entry.topic}</p>
-                <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-museum-400">
-                  <Clock className="w-3 h-3" />
-                  {new Date(entry.createdAt).toLocaleString('zh-CN')}
+                <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-museum-600 break-words md:mt-4 md:text-[15px]">
+                  {entry.topic}
+                </p>
+
+                <div className="mt-6 flex items-center justify-between gap-3 border-t border-museum-200/70 pt-4 md:mt-7 md:pt-5">
+                  <div className="flex items-center gap-3 text-[10px] font-mono uppercase tracking-[0.18em] text-museum-400">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Clock className="h-3 w-3" />
+                      {new Date(entry.createdAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}
+                    </span>
+                    {voiceCount > 0 && (
+                      <>
+                        <span className="text-museum-300">·</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Quote className="h-3 w-3" />
+                          {voiceCount} 段声音
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </a>
 
@@ -209,7 +194,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
                   }}
                   aria-label={`删除「${entry.title}」`}
                   title="删除这条历史记录"
-                  className="group/del absolute bottom-3 right-3 inline-flex h-9 items-center rounded-full border border-museum-200/70 bg-white/70 px-2.5 text-museum-400 shadow-sm backdrop-blur-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-red-200/80 hover:bg-red-50/95 hover:text-red-700 hover:shadow active:translate-y-0 active:bg-red-100/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200 opacity-60 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                  className="group/del absolute bottom-3 right-3 inline-flex h-8 items-center rounded-full border border-museum-200/70 bg-white/80 px-2 text-museum-400 shadow-sm backdrop-blur-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-red-200/80 hover:bg-red-50/95 hover:text-red-700 hover:shadow active:translate-y-0 active:bg-red-100/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200 opacity-60 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                 >
                   <span
                     aria-hidden="true"
@@ -222,20 +207,53 @@ const HistoryPage: React.FC<HistoryPageProps> = ({
               )}
 
               {entry.isPreset && onRegeneratePreset && (
-                <div className="border-t border-museum-100 px-6 py-4 bg-white/55 md:px-8">
+                <div className="border-t border-museum-200/60 bg-museum-50/40 px-5 py-3 md:px-7">
                   <button
                     onClick={onRegeneratePreset}
                     disabled={!canRegeneratePreset}
-                    className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-museum-600 hover:text-museum-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-museum-600 transition-colors hover:text-museum-900 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <RotateCcw className="w-3 h-3" /> 用真实链路重新生成样本
+                    <RotateCcw className="h-3 w-3" /> 用真实链路重新生成样本
                   </button>
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <div className="mx-auto mt-12 max-w-3xl rounded-xl border border-museum-200 bg-white/75 p-4 shadow-sm backdrop-blur-md md:mt-16 md:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="text-left">
+            <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-museum-400">Archive Toolkit</p>
+            <p className="mt-2 text-sm leading-relaxed text-museum-700">下载或导入本地历史记录；删除操作只影响当前浏览器里的档案。</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                onDownloadHistory?.();
+                setArchiveMessage(userEntries.length > 0 ? '已开始下载历史备份。' : '当前没有可下载的用户历史。');
+              }}
+              disabled={!onDownloadHistory || userEntries.length === 0}
+              className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/80 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Download className="h-3.5 w-3.5" /> 下载 JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!onImportHistory}
+              className="inline-flex items-center justify-center gap-2 border border-museum-300 bg-white/80 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-700 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Upload className="h-3.5 w-3.5" /> 导入 JSON
+            </button>
+          </div>
+        </div>
+        <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
+        {archiveMessage && <p className="mt-3 text-left text-xs leading-relaxed text-museum-500">{archiveMessage}</p>}
+      </div>
     </div>
   );
 };

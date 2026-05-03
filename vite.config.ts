@@ -79,8 +79,8 @@ export default defineConfig(({ mode }) => {
       'process.env.SOPHIA_API_PROVIDER': JSON.stringify(sophiaApiProvider),
       'process.env.SOPHIA_API_CONFIGURED': JSON.stringify(sophiaApiKey ? 'true' : 'false'),
       'process.env.SOPHIA_PRESET_GPT_MODEL': JSON.stringify(env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_PRESET_GPT_MODEL || sophiaApiModel),
-      'process.env.SOPHIA_PRESET_MIMO_MODEL': JSON.stringify(env.SOPHIA_PRESET_MIMO_MODEL || process.env.SOPHIA_PRESET_MIMO_MODEL || ''),
-      'process.env.SOPHIA_PRESET_GROK_MODEL': JSON.stringify(env.SOPHIA_PRESET_GROK_MODEL || process.env.SOPHIA_PRESET_GROK_MODEL || ''),
+      'process.env.SOPHIA_PRESET_MIMO_MODEL': JSON.stringify(env.SOPHIA_PRESET_MIMO_MODEL || process.env.SOPHIA_PRESET_MIMO_MODEL || 'mimo-v2.5-pro'),
+      'process.env.SOPHIA_PRESET_GROK_MODEL': JSON.stringify(env.SOPHIA_PRESET_GROK_MODEL || process.env.SOPHIA_PRESET_GROK_MODEL || 'grok-4.20-0309-non-reasoning'),
     },
     resolve: {
       alias: {

@@ -8,11 +8,20 @@ import HistoryPage from './components/HistoryPage';
 import ManifestoPage from './components/ManifestoPage';
 import SettingsPage from './components/SettingsPage';
 import ActiveRunBanner from './components/ActiveRunBanner';
+import AnnouncementModal from './components/AnnouncementModal';
+import { HangingLabel } from './components/PageHero';
 import { PRELOADED_HISTORY_ENTRY } from './data/preloadedHistory';
-import { Info, ArrowRight, Sparkles } from 'lucide-react';
+import { ANNOUNCEMENT } from './data/announcement';
+import { Info, ArrowRight, Sparkles, Megaphone } from 'lucide-react';
 import { validateUserPrompt } from './utils/inputValidation';
 import { recordUsage as recordTokenUsage } from './services/tokenAccounting';
 import { reframeUserTopic, type ReframeCandidate } from './services/topicReframe';
+import {
+  buildAvatarKey,
+  deleteAvatarImages,
+  getAvatarImages,
+  putAvatarImage,
+} from './services/imageStore';
 import TopicReframeDialog from './components/TopicReframeDialog';
 
 type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result';
@@ -20,6 +29,7 @@ type SelectedSource = 'active' | 'history' | null;
 type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}`;
 
 const HISTORY_KEY = 'sophia.history.v1';
+const ANNOUNCEMENT_DISMISSED_KEY = 'sophia.announcement.dismissed.v1';
 const HISTORY_LIMIT = 10;
 const HISTORY_EXPORT_VERSION = 1;
 const PRESET_HISTORY_KEY = 'sophia.preset.generated.feminism.v1';
@@ -85,8 +95,133 @@ const loadGeneratedPreset = (): HistoryEntry | null => {
   }
 };
 
-const saveHistory = (entries: HistoryEntry[]) => {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, HISTORY_LIMIT)));
+const isQuotaError = (error: unknown): boolean => {
+  if (!error) return false;
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+    return error.name === 'QuotaExceededError' || error.code === 22;
+  }
+  const name = (error as { name?: string })?.name;
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
+};
+
+const stripAvatarImage = (entry: HistoryEntry): HistoryEntry => ({
+  ...entry,
+  result: {
+    ...entry.result,
+    voices: entry.result.voices.map((voice) =>
+      voice.avatar?.imageUrl ? { ...voice, avatar: { ...voice.avatar, imageUrl: '' } } : voice,
+    ),
+  },
+});
+
+/**
+ * Split an entry into its lean form (suitable for localStorage) plus the list
+ * of (key, imageUrl) pairs that should land in IndexedDB. Voice ids are
+ * scoped per-analysis, so we namespace by entry id.
+ */
+const splitAvatarsForStorage = (
+  entry: HistoryEntry,
+): { lean: HistoryEntry; images: Array<{ key: string; imageUrl: string }> } => {
+  const images: Array<{ key: string; imageUrl: string }> = [];
+  const lean: HistoryEntry = {
+    ...entry,
+    result: {
+      ...entry.result,
+      voices: entry.result.voices.map((voice) => {
+        if (!voice.avatar?.imageUrl) return voice;
+        const url = voice.avatar.imageUrl;
+        // Bundled preset avatars are imported as small Vite asset URLs (e.g.
+        // `/assets/01-...png`); leave those inline so the preloaded preset
+        // works without IDB. Only base64 data: URLs are the storage hog.
+        if (!url.startsWith('data:')) return voice;
+        images.push({ key: buildAvatarKey(entry.id, voice.id), imageUrl: url });
+        return { ...voice, avatar: { ...voice.avatar, imageUrl: '' } };
+      }),
+    },
+  };
+  return { lean, images };
+};
+
+const mergeAvatarsFromStore = (
+  entry: HistoryEntry,
+  imageMap: Record<string, string>,
+): HistoryEntry => ({
+  ...entry,
+  result: {
+    ...entry.result,
+    voices: entry.result.voices.map((voice) => {
+      if (!voice.avatar) return voice;
+      if (voice.avatar.imageUrl) return voice; // already has a url (bundled preset)
+      const url = imageMap[buildAvatarKey(entry.id, voice.id)];
+      if (!url) return voice;
+      return { ...voice, avatar: { ...voice.avatar, imageUrl: url } };
+    }),
+  },
+});
+
+const collectAvatarKeys = (entry: HistoryEntry): string[] =>
+  entry.result.voices
+    .filter((voice) => !!voice.avatar)
+    .map((voice) => buildAvatarKey(entry.id, voice.id));
+
+const persistEntryAvatars = async (entry: HistoryEntry): Promise<void> => {
+  const { images } = splitAvatarsForStorage(entry);
+  if (images.length === 0) return;
+  await Promise.all(images.map(({ key, imageUrl }) => putAvatarImage(key, imageUrl)));
+};
+
+const hydrateEntriesWithAvatars = async (entries: HistoryEntry[]): Promise<HistoryEntry[]> => {
+  if (entries.length === 0) return entries;
+  const keys: string[] = [];
+  entries.forEach((entry) => {
+    entry.result.voices.forEach((voice) => {
+      if (voice.avatar && !voice.avatar.imageUrl) {
+        keys.push(buildAvatarKey(entry.id, voice.id));
+      }
+    });
+  });
+  if (keys.length === 0) return entries;
+  const imageMap = await getAvatarImages(keys);
+  if (Object.keys(imageMap).length === 0) return entries;
+  return entries.map((entry) => mergeAvatarsFromStore(entry, imageMap));
+};
+
+/**
+ * Best-effort write to localStorage. Avatar imageUrls now live in IndexedDB —
+ * we always write the LEAN form here. The legacy quota cascade stays as a
+ * paranoid backstop for the rare case where even avatar-stripped metadata
+ * exceeds 5MB. Returns the entries kept in storage; caller mirrors that into
+ * in-memory state so reload-after-shed doesn't reveal a different list.
+ */
+const saveHistory = (entries: HistoryEntry[]): HistoryEntry[] => {
+  const trimmed = entries.slice(0, HISTORY_LIMIT);
+  const tryWriteLean = (candidate: HistoryEntry[]): boolean => {
+    const lean = candidate.map((entry) => splitAvatarsForStorage(entry).lean);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(lean));
+      return true;
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+      return false;
+    }
+  };
+
+  if (tryWriteLean(trimmed)) return trimmed;
+
+  // Even with avatars out, metadata could in theory exceed 5MB — drop oldest.
+  let candidate = trimmed;
+  while (candidate.length > 0) {
+    candidate = candidate.slice(0, -1);
+    if (candidate.length === 0) break;
+    if (tryWriteLean(candidate)) {
+      console.warn(`[sophia] history metadata too large; kept ${candidate.length} most recent entries.`);
+      return candidate;
+    }
+  }
+
+  try { localStorage.removeItem(HISTORY_KEY); } catch { /* ignore */ }
+  console.warn('[sophia] localStorage exhausted — history not persisted; in-memory only.');
+  return [];
 };
 
 const isHistoryEntry = (value: unknown): value is HistoryEntry => {
@@ -213,6 +348,42 @@ const createVoiceStreamThrottle = (
   return { schedule, flush, clearOne, clearAll };
 };
 
+/**
+ * One-shot migration on first load after the IDB upgrade lands. Detects legacy
+ * inline base64 avatars in localStorage, lifts them into IndexedDB, and rewrites
+ * localStorage as the lean form. Idempotent — sentinel flag prevents re-runs.
+ */
+const IDB_MIGRATION_FLAG = 'sophia.idb.migrated.v1';
+
+const maybeMigrateLegacyAvatars = async (): Promise<void> => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (localStorage.getItem(IDB_MIGRATION_FLAG) === '1') return;
+  } catch {
+    return;
+  }
+  const entries = loadHistory();
+  const preset = loadGeneratedPreset();
+  const all = preset ? [preset, ...entries] : entries;
+  const hasInline = all.some((entry) =>
+    entry.result.voices.some((voice) => voice.avatar?.imageUrl?.startsWith('data:')),
+  );
+  if (hasInline) {
+    await Promise.all(all.map(persistEntryAvatars));
+    saveHistory(entries); // already strips for storage internally
+    if (preset) {
+      try {
+        const { lean } = splitAvatarsForStorage(preset);
+        localStorage.setItem(PRESET_HISTORY_KEY, JSON.stringify(lean));
+      } catch {
+        // leave as-is; migration will retry next load
+      }
+    }
+    console.info('[sophia] migrated inline avatars to IndexedDB');
+  }
+  try { localStorage.setItem(IDB_MIGRATION_FLAG, '1'); } catch { /* ignore */ }
+};
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [topicHint, setTopicHint] = useState<{ message: string; suggestions?: string[] } | null>(null);
@@ -234,6 +405,11 @@ const App: React.FC = () => {
     continuationContext?: ContinuationContext;
   } | null>(null);
   const [isReframing, setIsReframing] = useState(false);
+  // Announcement visibility is its own piece of state so the nav "Notice"
+  // button can re-open the modal even after the user dismissed it. The first
+  // mount seeds it from localStorage (auto-show only when the visitor hasn't
+  // already dismissed THIS announcement id).
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
   const activeRunIdRef = useRef<string | null>(null);
   const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
 
@@ -252,6 +428,11 @@ const App: React.FC = () => {
       setTopic(nextPresetEntry.topic);
       setSelectedSource('history');
       setView('result');
+      void hydrateEntriesWithAvatars([nextPresetEntry]).then(([hydratedPreset]) => {
+        if (hydratedPreset === nextPresetEntry) return;
+        setPresetEntry(hydratedPreset);
+        setSelectedHistoryResult(hydratedPreset.result);
+      });
       return;
     }
 
@@ -265,6 +446,12 @@ const App: React.FC = () => {
         setTopic(historyEntry.topic);
         setSelectedSource('history');
         setView('result');
+        void hydrateEntriesWithAvatars(storedHistory).then((hydrated) => {
+          if (hydrated === storedHistory) return;
+          setHistoryEntries(hydrated);
+          const refreshed = hydrated.find((entry) => entry.id === historyId);
+          if (refreshed) setSelectedHistoryResult(refreshed.result);
+        });
         return;
       }
       window.history.replaceState(null, '', '/history');
@@ -315,6 +502,30 @@ const App: React.FC = () => {
     setPresetEntry(nextPresetEntry);
     openRoute(normalizeRoute(window.location.pathname), true);
 
+    try {
+      const dismissedId = localStorage.getItem(ANNOUNCEMENT_DISMISSED_KEY);
+      if (ANNOUNCEMENT.enabled && dismissedId !== ANNOUNCEMENT.id) {
+        setAnnouncementOpen(true);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Async: lift any legacy inline avatars into IDB, then hydrate the lean
+    // entries we just loaded with their imageUrls. The initial render is fine
+    // without imageUrls — ThoughtVoiceCard already handles the fallback path.
+    void (async () => {
+      await maybeMigrateLegacyAvatars();
+      const stored = loadHistory();
+      const hydrated = await hydrateEntriesWithAvatars(stored);
+      if (hydrated !== stored) setHistoryEntries(hydrated);
+      const presetStored = loadGeneratedPreset();
+      if (presetStored) {
+        const [hydratedPreset] = await hydrateEntriesWithAvatars([presetStored]);
+        if (hydratedPreset !== presetStored) setPresetEntry(hydratedPreset);
+      }
+    })();
+
     const handlePopState = () => openRoute(normalizeRoute(window.location.pathname), true);
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -332,6 +543,20 @@ const App: React.FC = () => {
   const showResult = view === 'result';
   const isViewingActiveRun = showResult && selectedSource === 'active';
   const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
+  // Hide the announcement modal whenever the reframe modal is open so the
+  // two never stack on top of each other.
+  const showAnnouncement = announcementOpen && !reframeState?.open;
+
+  const openAnnouncement = () => setAnnouncementOpen(true);
+
+  const handleDismissAnnouncement = () => {
+    try {
+      localStorage.setItem(ANNOUNCEMENT_DISMISSED_KEY, ANNOUNCEMENT.id);
+    } catch {
+      /* ignore */
+    }
+    setAnnouncementOpen(false);
+  };
 
   const persistResult = (nextResult: AnalysisResult) => {
     const entry: HistoryEntry = {
@@ -343,11 +568,19 @@ const App: React.FC = () => {
       createdAt: nextResult.createdAt,
       result: nextResult,
     };
+    void persistEntryAvatars(entry);
     setHistoryEntries((prev) => {
       const filtered = prev.filter((item) => item.id !== entry.id);
       const next = [entry, ...filtered].slice(0, HISTORY_LIMIT);
-      saveHistory(next);
-      return next;
+      const saved = saveHistory(next);
+      // GC IDB rows for entries that fell off the tail.
+      const keptIds = new Set(saved.map((e) => e.id));
+      const droppedKeys: string[] = [];
+      next.forEach((e) => {
+        if (!keptIds.has(e.id)) droppedKeys.push(...collectAvatarKeys(e));
+      });
+      if (droppedKeys.length > 0) void deleteAvatarImages(droppedKeys);
+      return saved.length > 0 ? saved : next;
     });
   };
 
@@ -363,7 +596,14 @@ const App: React.FC = () => {
       isPreset: true,
       generatedByChain: true,
     };
-    localStorage.setItem(PRESET_HISTORY_KEY, JSON.stringify(entry));
+    void persistEntryAvatars(entry);
+    const { lean } = splitAvatarsForStorage(entry);
+    try {
+      localStorage.setItem(PRESET_HISTORY_KEY, JSON.stringify(lean));
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+      console.warn('[sophia] preset cache quota exhausted — preset not persisted.');
+    }
     setPresetEntry(entry);
   };
 
@@ -758,8 +998,11 @@ const App: React.FC = () => {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, HISTORY_LIMIT);
 
-    saveHistory(nextEntries);
-    setHistoryEntries(nextEntries);
+    // Lift inline base64 avatars from the imported JSON into IDB, fire-and-forget.
+    newEntries.forEach((entry) => { void persistEntryAvatars(entry); });
+
+    const saved = saveHistory(nextEntries);
+    setHistoryEntries(saved.length > 0 ? saved : nextEntries);
     return {
       imported: newEntries.length,
       scanned: importedEntries.length,
@@ -770,6 +1013,7 @@ const App: React.FC = () => {
   const handleDeleteHistoryEntry = (entry: HistoryEntry) => {
     if (entry.isPreset) return;
     const nextEntries = historyEntries.filter((item) => item.id !== entry.id);
+    void deleteAvatarImages(collectAvatarKeys(entry));
     saveHistory(nextEntries);
     setHistoryEntries(nextEntries);
     if (selectedHistoryResult?.id === entry.id) {
@@ -807,15 +1051,26 @@ const App: React.FC = () => {
               </svg>
               <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border border-white/80 bg-[#C5A059] shadow-[0_0_0_3px_rgba(197,160,89,0.18)] transition-transform duration-300 group-hover:scale-110" />
             </div>
-            <div className="leading-none">
+            <div className="hidden leading-none sm:block">
               <p className="font-serif text-base tracking-[0.04em] text-museum-900 md:text-lg">Sophia's</p>
               <p className="mt-1 hidden text-[9px] font-mono uppercase tracking-[0.24em] text-museum-500 sm:block md:text-[10px]">Dialectic Engine</p>
             </div>
           </button>
-          <div className="flex items-center gap-2 md:gap-6">
-            <button onClick={goHistory} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
-            <button onClick={goManifesto} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
-            <button onClick={goSettings} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto pl-2 md:flex-none md:gap-6 md:overflow-visible md:pl-0">
+            {ANNOUNCEMENT.enabled && (
+              <button
+                onClick={openAnnouncement}
+                aria-label="查看公告"
+                title="查看公告"
+                className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-museum-600 hover:text-museum-900 transition-colors sm:px-3 md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0"
+              >
+                <Megaphone className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden="true" />
+                <span className="sr-only">查看公告</span>
+              </button>
+            )}
+            <button onClick={goHistory} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
+            <button onClick={goManifesto} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
+            <button onClick={goSettings} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
           </div>
         </div>
       </nav>
@@ -825,15 +1080,9 @@ const App: React.FC = () => {
         {showHome && (
           <div className="flex-grow flex flex-col items-center justify-center -mt-2 pt-6 pb-10 transition-all duration-700 animate-fade-in px-2 md:-mt-8 md:pt-8 md:pb-14 md:px-0">
             <div className="max-w-4xl w-full text-center relative mb-8 md:mb-16">
-              <div className="absolute left-1/2 -top-12 h-12 w-px bg-museum-300 -translate-x-1/2 hidden md:block" />
-
-              <div
-                className="notranslate pointer-events-none relative z-20 mb-4 inline-flex h-8 max-w-[calc(100vw-2rem)] select-none items-center justify-center rounded-full border border-museum-300/80 bg-museum-50/90 px-4 shadow-sm backdrop-blur-md md:mb-8"
-                translate="no"
-                aria-label="The Philosophical Engine"
-              >
-                <span className="block whitespace-nowrap text-[10px] font-mono uppercase leading-none tracking-[0.18em] text-museum-700 md:text-xs md:tracking-[0.2em]">The Philosophical Engine</span>
-              </div>
+              <HangingLabel ariaLabel="The Philosophical Engine" className="mb-4 md:mb-8">
+                The Philosophical Engine
+              </HangingLabel>
 
               <h1 className="font-serif text-4xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.92] sm:leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
                 Sophia's<br />
@@ -847,7 +1096,7 @@ const App: React.FC = () => {
 
               <p className="text-sm sm:text-base md:text-xl text-museum-700 max-w-xs sm:max-w-xl mx-auto leading-relaxed font-light mt-4 md:mt-8 px-2">
                 Where your modern anxieties become a map of thought.
-                <span className="block mt-2 text-museum-500 text-xs md:text-sm font-serif italic">
+                <span className="block mt-2 text-museum-500 text-xs md:text-sm font-serif font-light tracking-wider">
                   输入一个困惑，生成一份可阅读的哲学分析。
                 </span>
               </p>
@@ -982,6 +1231,7 @@ const App: React.FC = () => {
                 isAnalyzing={activeRunIsRunning}
                 isFinished={!activeRunIsRunning && !!displayedResult && displayedProgress?.stage === 'done'}
                 progress={displayedProgress}
+                log={activeRun?.log}
               />
             )}
 
@@ -1029,6 +1279,20 @@ const App: React.FC = () => {
         onPick={handleReframePick}
         onKeepOriginal={handleReframeKeepOriginal}
         onCancel={handleReframeCancel}
+      />
+
+      <AnnouncementModal
+        open={showAnnouncement}
+        announcement={ANNOUNCEMENT}
+        onDismiss={handleDismissAnnouncement}
+        onCta={
+          ANNOUNCEMENT.cta?.href === '/manifesto'
+            ? () => {
+                handleDismissAnnouncement();
+                goManifesto();
+              }
+            : undefined
+        }
       />
     </div>
   );

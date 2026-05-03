@@ -101,7 +101,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           <div className="flex items-center space-x-3">
             {isDone ? <CheckCircle2 className="w-5 h-5 text-emerald-700" /> : <Loader2 className="w-5 h-5 animate-spin text-museum-800" />}
             <div>
-              <span className="font-serif italic text-museum-900">Sophia 的思想工作台</span>
+              <span className="font-serif font-light tracking-wider text-museum-900">Sophia 的思想工作台</span>
               <p className="text-xs font-mono uppercase tracking-widest text-museum-400 mt-1">
                 第 {stageNumber} 步 · {STAGE_LABEL[currentStage]} {progress?.modeLabel ? `· ${progress.modeLabel}` : ''}
               </p>
@@ -167,14 +167,14 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           })}
         </div>
 
-        {progress?.messages?.length ? (
-          <div className="mt-5 border-t border-museum-100 pt-4 space-y-2">
-            <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">最新生成动态</p>
-            {progress.messages.slice(-3).map((message, idx) => (
-              <p key={`${message}-${idx}`} className="text-sm text-museum-700 leading-relaxed">· {message}</p>
-            ))}
+        {progress?.stage === 'error' && progress.messages?.length ? (
+          <div className="mt-5 border-t border-red-100 pt-4">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-red-700">错误信息</p>
+            <p className="mt-1 text-sm text-red-700 leading-relaxed">{progress.messages[progress.messages.length - 1]}</p>
           </div>
         ) : null}
+
+        <GenerationLogPanel entries={log ?? []} isAnalyzing={isAnalyzing} />
       </div>
     </div>
   );
