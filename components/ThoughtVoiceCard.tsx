@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ThoughtVoice } from '../types';
-import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Loader2, RefreshCw } from 'lucide-react';
 
 interface ThoughtVoiceCardProps {
   data: ThoughtVoice;
   index: number;
+  onRetry?: (voiceId: string) => void;
+  isRetrying?: boolean;
+  retryDisabled?: boolean;
 }
 
 const kindLabel: Record<string, string> = {
@@ -185,7 +188,7 @@ const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoice
   };
 };
 
-const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
+const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetry, isRetrying = false, retryDisabled = false }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(() => typeof window === 'undefined' ? DESKTOP_PREVIEW_HEIGHT : window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
   const [contentHeight, setContentHeight] = useState(previewHeight);
@@ -371,6 +374,18 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index }) => {
             <AlertCircle className="w-6 h-6 mx-auto mb-4" />
             <p className="font-serif text-xl">这一位思想声音生成失败</p>
             <p className="text-sm mt-2">{data.error || '可以稍后重新生成。'}</p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(data.id)}
+                disabled={retryDisabled || isRetrying}
+                className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-museum-900 text-museum-50 rounded-full text-sm font-serif hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={`重新生成 ${data.name}`}
+              >
+                {isRetrying ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {isRetrying ? '正在重新生成…' : '重新生成这张卡片'}
+              </button>
+            )}
           </div>
         )}
 

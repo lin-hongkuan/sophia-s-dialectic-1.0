@@ -124,7 +124,14 @@ const ManifestoPage: React.FC<ManifestoPageProps> = ({ onBack }) => {
 
       {/* Reading Contract */}
       <section className="relative overflow-hidden rounded-2xl bg-museum-900 text-museum-50 shadow-xl">
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10" aria-hidden="true" />
+        <div
+          className="absolute inset-0 opacity-10"
+          aria-hidden="true"
+          style={{
+            backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+            backgroundSize: '160px 160px',
+          }}
+        />
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] relative z-10">
           <div className="p-6 md:p-14 lg:border-r lg:border-white/10 flex flex-col justify-center bg-gradient-to-br from-museum-900 to-museum-800">
             <p className="mb-6 inline-flex border border-white/20 rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.2em] text-museum-300 w-max">

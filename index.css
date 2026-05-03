@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Sophia's Dialectic - Custom Styles */
 
 /* Base animations */
@@ -43,4 +47,23 @@ html {
 ::selection {
   background-color: #E6E2D8;
   color: #2C2A26;
+}
+
+/* Respect user preference for reduced motion: disable all animations and shorten transitions
+   so screen readers / vestibular-sensitive users get a near-static experience. The 0.01ms duration
+   is the standard pattern — it lets components rely on transitionend events while making motion
+   imperceptible. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-fade-in {
+    animation: none !important;
+  }
 }

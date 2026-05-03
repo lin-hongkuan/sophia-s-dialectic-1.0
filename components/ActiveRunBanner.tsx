@@ -1,23 +1,12 @@
 import React from 'react';
 import { ActiveAnalysisRun } from '../types';
 import { ArrowRight, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { STAGE_LABEL, STAGE_ORDER } from '../constants';
 
 interface ActiveRunBannerProps {
   activeRun: ActiveAnalysisRun;
   onOpen: () => void;
 }
-
-const stageLabel: Record<string, string> = {
-  idle: '等待',
-  outline: '整理问题结构',
-  route: '生成论证路线',
-  voices: '生成思想声音',
-  synthesis: '综合判断',
-  done: '完成',
-  error: '出错',
-};
-
-const stageOrder = ['outline', 'route', 'voices', 'synthesis', 'done'];
 
 const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) => {
   const isRunning = activeRun.status === 'starting' || activeRun.status === 'running';
@@ -26,8 +15,8 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
   const title = activeRun.result?.philosophical_title || activeRun.topic;
   const progress = activeRun.progress;
   const stage = progress?.stage || 'outline';
-  const stageIndex = stageOrder.indexOf(stage);
-  const stageText = stageIndex >= 0 ? `第 ${Math.min(stageIndex + 1, 4)}/4 步 · ${stageLabel[stage]}` : stageLabel[stage];
+  const stageIndex = STAGE_ORDER.indexOf(stage);
+  const stageText = stageIndex >= 0 ? `第 ${Math.min(stageIndex + 1, 4)}/4 步 · ${STAGE_LABEL[stage]}` : STAGE_LABEL[stage];
   const progressText = progress?.totalVoices
     ? `${stageText} · ${progress.completedVoices}/${progress.totalVoices} 个思想声音`
     : stageText;
