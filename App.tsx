@@ -1,21 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions } from './services/sophiaService';
-import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, HistoryEntry, ThoughtVoice } from './types';
+import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions, regenerateThoughtVoice } from './services/sophiaService';
+import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, ThoughtVoice, TokenUsage } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
 import DynamicBackground from './components/DynamicBackground';
 import HistoryPage from './components/HistoryPage';
 import ManifestoPage from './components/ManifestoPage';
+import SettingsPage from './components/SettingsPage';
 import ActiveRunBanner from './components/ActiveRunBanner';
 import { PRELOADED_HISTORY_ENTRY } from './data/preloadedHistory';
 import { Info, ArrowRight, Sparkles } from 'lucide-react';
+import { validateUserPrompt } from './utils/inputValidation';
+import { recordUsage as recordTokenUsage } from './services/tokenAccounting';
+import { reframeUserTopic, type ReframeCandidate } from './services/topicReframe';
+import TopicReframeDialog from './components/TopicReframeDialog';
 
-type View = 'home' | 'history' | 'manifesto' | 'result';
+type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result';
 type SelectedSource = 'active' | 'history' | null;
-type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | `/history/${string}`;
+type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}`;
 
 const HISTORY_KEY = 'sophia.history.v1';
 const HISTORY_LIMIT = 10;
+const HISTORY_EXPORT_VERSION = 1;
 const PRESET_HISTORY_KEY = 'sophia.preset.generated.feminism.v1';
 const PRESET_TOPIC = '女性主义有道理吗？';
 const DEFAULT_QUESTION_SUGGESTIONS = ['女性主义有道理吗？', '如何克服虚无主义？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
@@ -28,9 +34,15 @@ const ROUTES: Record<string, AppRoute> = {
   '/history/sample/': '/history/sample',
   '/manifesto': '/manifesto',
   '/manifesto/': '/manifesto',
+  '/settings': '/settings',
+  '/settings/': '/settings',
 };
 
-const makeRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const makeRunId = () => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  const suffix = uuid ? uuid.replace(/-/g, '').slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  return `run-${Date.now()}-${suffix}`;
+};
 
 const normalizeRoute = (pathname: string): AppRoute => {
   if (ROUTES[pathname]) return ROUTES[pathname];
@@ -77,6 +89,44 @@ const saveHistory = (entries: HistoryEntry[]) => {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, HISTORY_LIMIT)));
 };
 
+const isHistoryEntry = (value: unknown): value is HistoryEntry => {
+  const item = value as Partial<HistoryEntry> | null;
+  const result = item?.result as Partial<AnalysisResult> | undefined;
+  return !!item
+    && typeof item.id === 'string'
+    && typeof item.topic === 'string'
+    && typeof item.title === 'string'
+    && typeof item.createdAt === 'string'
+    && !!result
+    && typeof result.id === 'string'
+    && typeof result.topic === 'string'
+    && typeof result.philosophical_title === 'string'
+    && Array.isArray(result.voices)
+    && Array.isArray(result.tensions)
+    && Array.isArray(result.followUps);
+};
+
+const extractImportedHistory = (value: unknown): HistoryEntry[] => {
+  if (Array.isArray(value)) return value.filter(isHistoryEntry);
+  const maybeEntries = (value as { entries?: unknown })?.entries;
+  if (Array.isArray(maybeEntries)) return maybeEntries.filter(isHistoryEntry);
+  return [];
+};
+
+const buildHistoryBackupFilename = () => `sophia-history-${new Date().toISOString().slice(0, 10)}.json`;
+
+const downloadJsonFile = (filename: string, data: unknown) => {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 interface AppErrorBoundaryProps {
   children: React.ReactNode;
   resetKey: string;
@@ -120,8 +170,52 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBo
   }
 }
 
+interface VoiceStreamThrottle {
+  schedule: (voiceId: string, fullText: string) => void;
+  flush: (voiceId: string) => void;
+  clearOne: (voiceId: string) => void;
+  clearAll: () => void;
+}
+
+// Coalesces streaming voice deltas to a 120ms cadence so React doesn't re-render on every chunk.
+const createVoiceStreamThrottle = (
+  applyVoiceText: (voiceId: string, fullText: string) => void,
+): VoiceStreamThrottle => {
+  const pending = new Map<string, string>();
+  const timers = new Map<string, number>();
+
+  const clearOne = (voiceId: string) => {
+    const timer = timers.get(voiceId);
+    if (timer) window.clearTimeout(timer);
+    timers.delete(voiceId);
+    pending.delete(voiceId);
+  };
+
+  const flush = (voiceId: string) => {
+    const fullText = pending.get(voiceId);
+    clearOne(voiceId);
+    if (fullText !== undefined) applyVoiceText(voiceId, fullText);
+  };
+
+  const schedule = (voiceId: string, fullText: string) => {
+    pending.set(voiceId, fullText);
+    if (timers.has(voiceId)) return;
+    const timer = window.setTimeout(() => flush(voiceId), 120);
+    timers.set(voiceId, timer);
+  };
+
+  const clearAll = () => {
+    timers.forEach((timer) => window.clearTimeout(timer));
+    timers.clear();
+    pending.clear();
+  };
+
+  return { schedule, flush, clearOne, clearAll };
+};
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
+  const [topicHint, setTopicHint] = useState<{ message: string; suggestions?: string[] } | null>(null);
   const [view, setView] = useState<View>('home');
   const [selectedSource, setSelectedSource] = useState<SelectedSource>(null);
   const [selectedHistoryResult, setSelectedHistoryResult] = useState<AnalysisResult | null>(null);
@@ -132,7 +226,16 @@ const App: React.FC = () => {
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
   const [isAppendingVoice, setIsAppendingVoice] = useState(false);
+  const [retryingVoiceId, setRetryingVoiceId] = useState<string | null>(null);
+  const [reframeState, setReframeState] = useState<{
+    open: boolean;
+    originalTopic: string;
+    candidates: ReframeCandidate[];
+    continuationContext?: ContinuationContext;
+  } | null>(null);
+  const [isReframing, setIsReframing] = useState(false);
   const activeRunIdRef = useRef<string | null>(null);
+  const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
 
   const openRoute = (route: AppRoute, replace = false) => {
     const nextPresetEntry = loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY;
@@ -185,12 +288,28 @@ const App: React.FC = () => {
       return;
     }
 
+    if (route === '/settings') {
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setView('settings');
+      return;
+    }
+
     setSelectedSource(null);
     setSelectedHistoryResult(null);
     setView('home');
   };
 
   useEffect(() => {
+    // Hide the pre-React boot splash and cancel its slow-network timer.
+    const splash = document.getElementById('boot-splash');
+    if (splash) splash.remove();
+    const w = window as Window & { __bootSlowTimer?: ReturnType<typeof setTimeout> };
+    if (w.__bootSlowTimer) {
+      clearTimeout(w.__bootSlowTimer);
+      w.__bootSlowTimer = undefined;
+    }
+
     setHistoryEntries(loadHistory());
     const nextPresetEntry = loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY;
     setPresetEntry(nextPresetEntry);
@@ -209,6 +328,7 @@ const App: React.FC = () => {
   const showHome = view === 'home';
   const showHistory = view === 'history';
   const showManifesto = view === 'manifesto';
+  const showSettings = view === 'settings';
   const showResult = view === 'result';
   const isViewingActiveRun = showResult && selectedSource === 'active';
   const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
@@ -257,6 +377,7 @@ const App: React.FC = () => {
   const goHome = () => openRoute('/');
   const goHistory = () => openRoute('/history');
   const goManifesto = () => openRoute('/manifesto');
+  const goSettings = () => openRoute('/settings');
 
   const updateActiveRun = (runId: string, updater: (run: ActiveAnalysisRun) => ActiveAnalysisRun) => {
     if (activeRunIdRef.current !== runId) return;
@@ -286,6 +407,7 @@ const App: React.FC = () => {
 
     const runId = makeRunId();
     activeRunIdRef.current = runId;
+    lastRunContextRef.current = { topic: trimmedTopic, continuationContext, isPresetRegeneration };
     setTopic(trimmedTopic);
     setSelectedHistoryResult(null);
     setSelectedSource('active');
@@ -304,23 +426,10 @@ const App: React.FC = () => {
       },
       error: null,
       isPresetRegeneration,
+      log: [],
     });
 
-    const pendingVoiceText = new Map<string, string>();
-    const voiceFlushTimers = new Map<string, number>();
-
-    const clearVoiceFlush = (voiceId: string) => {
-      const timer = voiceFlushTimers.get(voiceId);
-      if (timer) window.clearTimeout(timer);
-      voiceFlushTimers.delete(voiceId);
-      pendingVoiceText.delete(voiceId);
-    };
-
-    const flushVoiceText = (voiceId: string) => {
-      const fullText = pendingVoiceText.get(voiceId);
-      clearVoiceFlush(voiceId);
-      if (fullText === undefined) return;
-
+    const throttle = createVoiceStreamThrottle((voiceId, fullText) => {
       updateActiveRun(runId, (run) => run.result ? {
         ...run,
         result: {
@@ -328,21 +437,7 @@ const App: React.FC = () => {
           voices: run.result.voices.map((voice) => voice.id === voiceId ? { ...voice, argument: fullText, status: 'generating' } : voice),
         },
       } : run);
-    };
-
-    const scheduleVoiceTextFlush = (voiceId: string, fullText: string) => {
-      pendingVoiceText.set(voiceId, fullText);
-      if (voiceFlushTimers.has(voiceId)) return;
-
-      const timer = window.setTimeout(() => flushVoiceText(voiceId), 120);
-      voiceFlushTimers.set(voiceId, timer);
-    };
-
-    const clearAllVoiceFlushes = () => {
-      voiceFlushTimers.forEach((timer) => window.clearTimeout(timer));
-      voiceFlushTimers.clear();
-      pendingVoiceText.clear();
-    };
+    });
 
     try {
       const data = await analyzeTopic(trimmedTopic, {
@@ -356,10 +451,10 @@ const App: React.FC = () => {
             voices: run.result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating' } : voice),
           },
         } : run),
-        onVoiceDelta: (voiceId, _delta, fullText) => scheduleVoiceTextFlush(voiceId, fullText),
-        onVoiceStep: (voiceId, _voiceName, _message) => flushVoiceText(voiceId),
+        onVoiceDelta: (voiceId, _delta, fullText) => throttle.schedule(voiceId, fullText),
+        onVoiceStep: (voiceId, _voiceName, _message) => throttle.flush(voiceId),
         onVoiceComplete: (voice: ThoughtVoice) => {
-          clearVoiceFlush(voice.id);
+          throttle.clearOne(voice.id);
           updateActiveRun(runId, (run) => run.result ? {
             ...run,
             result: {
@@ -370,9 +465,11 @@ const App: React.FC = () => {
         },
         onSynthesis: (partial) => updateActiveRun(runId, (run) => run.result ? { ...run, result: { ...run.result, ...partial } } : run),
         onError: (message) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] } })),
+        onLog: (entry: GenerationLogEntry) => updateActiveRun(runId, (run) => ({ ...run, log: [...run.log, entry] })),
+        onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
       }, continuationContext);
 
-      clearAllVoiceFlushes();
+      throttle.clearAll();
       updateActiveRun(runId, (run) => ({
         ...run,
         status: 'completed',
@@ -393,7 +490,7 @@ const App: React.FC = () => {
         persistResult(data);
       }
     } catch (err) {
-      clearAllVoiceFlushes();
+      throttle.clearAll();
       const message = err instanceof Error ? err.message : '发生了未知错误';
       updateActiveRun(runId, (run) => ({
         ...run,
@@ -404,9 +501,60 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAnalyze = (e?: React.FormEvent, explicitTopic?: string, continuationContext?: ContinuationContext) => {
+  const handleAnalyze = async (e?: React.FormEvent, explicitTopic?: string, continuationContext?: ContinuationContext) => {
     e?.preventDefault();
-    startAnalysis(explicitTopic || topic, continuationContext);
+    const candidate = (explicitTopic || topic).trim();
+    const validation = validateUserPrompt(candidate, { mode: 'topic' });
+    if (!validation.ok) {
+      setTopicHint({ message: validation.hint || '', suggestions: validation.suggestions });
+      return;
+    }
+    setTopicHint(null);
+
+    // Continuation flows are already a philosophical question (followUp / append branch
+    // sourced from a prior analysis), so skip the reframe round-trip.
+    if (continuationContext) {
+      startAnalysis(candidate, continuationContext);
+      return;
+    }
+
+    if (isReframing) return;
+    setIsReframing(true);
+    try {
+      const reframe = await reframeUserTopic(candidate);
+      if (reframe.shouldReframe && reframe.candidates.length > 0) {
+        setReframeState({
+          open: true,
+          originalTopic: candidate,
+          candidates: reframe.candidates,
+        });
+        return;
+      }
+      startAnalysis(candidate);
+    } finally {
+      setIsReframing(false);
+    }
+  };
+
+  const handleReframePick = (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setTopic(trimmed);
+    setReframeState(null);
+    startAnalysis(trimmed);
+  };
+
+  const handleReframeKeepOriginal = () => {
+    if (!reframeState) {
+      return;
+    }
+    const original = reframeState.originalTopic;
+    setReframeState(null);
+    startAnalysis(original, reframeState.continuationContext);
+  };
+
+  const handleReframeCancel = () => {
+    setReframeState(null);
   };
 
   const handleGenerateQuestionSuggestions = async () => {
@@ -474,38 +622,12 @@ const App: React.FC = () => {
       setTopic(sourceResult.topic);
     }
 
-    const pendingVoiceText = new Map<string, string>();
-    const voiceFlushTimers = new Map<string, number>();
-
-    const clearVoiceFlush = (voiceId: string) => {
-      const timer = voiceFlushTimers.get(voiceId);
-      if (timer) window.clearTimeout(timer);
-      voiceFlushTimers.delete(voiceId);
-      pendingVoiceText.delete(voiceId);
-    };
-
-    const flushVoiceText = (voiceId: string) => {
-      const fullText = pendingVoiceText.get(voiceId);
-      clearVoiceFlush(voiceId);
-      if (fullText === undefined) return;
+    const throttle = createVoiceStreamThrottle((voiceId, fullText) => {
       updateDisplayedResult((result) => ({
         ...result,
         voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, argument: fullText, status: 'generating' } : voice),
       }));
-    };
-
-    const scheduleVoiceTextFlush = (voiceId: string, fullText: string) => {
-      pendingVoiceText.set(voiceId, fullText);
-      if (voiceFlushTimers.has(voiceId)) return;
-      const timer = window.setTimeout(() => flushVoiceText(voiceId), 120);
-      voiceFlushTimers.set(voiceId, timer);
-    };
-
-    const clearAllVoiceFlushes = () => {
-      voiceFlushTimers.forEach((timer) => window.clearTimeout(timer));
-      voiceFlushTimers.clear();
-      pendingVoiceText.clear();
-    };
+    });
 
     try {
       const updatedResult = await appendThoughtVoice(sourceResult, trimmedPrompt, {
@@ -514,26 +636,147 @@ const App: React.FC = () => {
           ...result,
           voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating' } : voice),
         })),
-        onVoiceDelta: (voiceId, _delta, fullText) => scheduleVoiceTextFlush(voiceId, fullText),
-        onVoiceStep: (voiceId) => flushVoiceText(voiceId),
+        onVoiceDelta: (voiceId, _delta, fullText) => throttle.schedule(voiceId, fullText),
+        onVoiceStep: (voiceId) => throttle.flush(voiceId),
         onVoiceComplete: (voice) => {
-          clearVoiceFlush(voice.id);
+          throttle.clearOne(voice.id);
           updateDisplayedResult((result) => ({
             ...result,
             voices: result.voices.map((item) => item.id === voice.id ? voice : item),
           }));
         },
         onSynthesis: (partial) => updateDisplayedResult((result) => ({ ...result, ...partial })),
+        onTokenUsage: (usage) => recordTokenUsage(usage),
       });
 
-      clearAllVoiceFlushes();
+      throttle.clearAll();
       updateDisplayedResult(() => updatedResult);
       persistResult(updatedResult);
     } catch (error) {
       console.error('[Sophia] append voice failed:', error);
     } finally {
-      clearAllVoiceFlushes();
+      throttle.clearAll();
       setIsAppendingVoice(false);
+    }
+  };
+
+  const handleRetryVoice = async (voiceId: string) => {
+    if (activeRunIsRunning || isAppendingVoice || retryingVoiceId) return;
+    const baseResult = displayedResult;
+    if (!baseResult) return;
+    const targetVoice = baseResult.voices.find((voice) => voice.id === voiceId);
+    if (!targetVoice) return;
+
+    setRetryingVoiceId(voiceId);
+
+    // If retrying on the bundled preset, clone it into a regular history entry first.
+    const sourceResult = selectedSource === 'history' && (baseResult.id === PRELOADED_HISTORY_ENTRY.result.id || baseResult.id === presetEntry.result.id)
+      ? { ...baseResult, id: makeRunId(), createdAt: new Date().toISOString() }
+      : baseResult;
+
+    if (sourceResult !== baseResult) {
+      pushRoute(`/history/${encodeURIComponent(sourceResult.id)}`);
+      setSelectedHistoryResult(sourceResult);
+      setTopic(sourceResult.topic);
+    }
+
+    // Optimistic UI: clear the prior failure on this card so user sees progress immediately.
+    updateDisplayedResult((result) => ({
+      ...result,
+      voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating', error: undefined, argument: '', summaryForSynthesis: '' } : voice),
+    }));
+
+    const throttle = createVoiceStreamThrottle((vid, fullText) => {
+      updateDisplayedResult((result) => ({
+        ...result,
+        voices: result.voices.map((voice) => voice.id === vid ? { ...voice, argument: fullText, status: 'generating' } : voice),
+      }));
+    });
+
+    try {
+      const updatedResult = await regenerateThoughtVoice(sourceResult, voiceId, {
+        onVoiceStart: (vid) => updateDisplayedResult((result) => ({
+          ...result,
+          voices: result.voices.map((voice) => voice.id === vid ? { ...voice, status: 'generating', error: undefined } : voice),
+        })),
+        onVoiceDelta: (vid, _delta, fullText) => throttle.schedule(vid, fullText),
+        onVoiceStep: (vid) => throttle.flush(vid),
+        onVoiceComplete: (voice) => {
+          throttle.clearOne(voice.id);
+          updateDisplayedResult((result) => ({
+            ...result,
+            voices: result.voices.map((item) => item.id === voice.id ? voice : item),
+          }));
+        },
+        onSynthesis: (partial) => updateDisplayedResult((result) => ({ ...result, ...partial })),
+        onTokenUsage: (usage) => recordTokenUsage(usage),
+      });
+
+      throttle.clearAll();
+      updateDisplayedResult(() => updatedResult);
+      persistResult(updatedResult);
+    } catch (error) {
+      console.error('[Sophia] retry voice failed:', error);
+      const message = error instanceof Error ? error.message : '重新生成失败';
+      updateDisplayedResult((result) => ({
+        ...result,
+        voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'failed', error: message } : voice),
+      }));
+    } finally {
+      throttle.clearAll();
+      setRetryingVoiceId(null);
+    }
+  };
+
+  const handleRegenerateAll = () => {
+    if (activeRunIsRunning || isAppendingVoice) return;
+    const ctx = lastRunContextRef.current;
+    if (ctx) {
+      startAnalysis(ctx.topic, ctx.continuationContext, ctx.isPresetRegeneration);
+      return;
+    }
+    const fallbackTopic = activeRun?.topic || topic;
+    if (fallbackTopic) startAnalysis(fallbackTopic);
+  };
+
+  const handleDownloadHistory = () => {
+    downloadJsonFile(buildHistoryBackupFilename(), {
+      app: 'sophia-dialectic',
+      version: HISTORY_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      entries: historyEntries,
+    });
+  };
+
+  const handleImportHistory = (content: string) => {
+    const importedEntries = extractImportedHistory(JSON.parse(content))
+      .filter((entry) => !entry.isPreset)
+      .map((entry) => ({ ...entry, isPreset: false, generatedByChain: false }));
+    const existingIds = new Set(historyEntries.map((entry) => entry.id));
+    const newEntries = importedEntries.filter((entry) => !existingIds.has(entry.id));
+    const nextEntries = [...newEntries, ...historyEntries]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, HISTORY_LIMIT);
+
+    saveHistory(nextEntries);
+    setHistoryEntries(nextEntries);
+    return {
+      imported: newEntries.length,
+      scanned: importedEntries.length,
+      limit: HISTORY_LIMIT,
+    };
+  };
+
+  const handleDeleteHistoryEntry = (entry: HistoryEntry) => {
+    if (entry.isPreset) return;
+    const nextEntries = historyEntries.filter((item) => item.id !== entry.id);
+    saveHistory(nextEntries);
+    setHistoryEntries(nextEntries);
+    if (selectedHistoryResult?.id === entry.id) {
+      setSelectedHistoryResult(null);
+      setSelectedSource(null);
+      setView('history');
+      pushRoute('/history');
     }
   };
 
@@ -570,8 +813,9 @@ const App: React.FC = () => {
             </div>
           </button>
           <div className="flex items-center gap-2 md:gap-6">
-            <button onClick={goHistory} className="rounded-full border border-museum-200/80 bg-white/45 px-3 py-1.5 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
-            <button onClick={goManifesto} className="rounded-full border border-museum-200/80 bg-white/45 px-3 py-1.5 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
+            <button onClick={goHistory} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
+            <button onClick={goManifesto} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
+            <button onClick={goSettings} className="inline-flex min-h-[36px] items-center rounded-full border border-museum-200/80 bg-white/45 px-3.5 py-2 text-[10px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
           </div>
         </div>
       </nav>
@@ -614,19 +858,45 @@ const App: React.FC = () => {
               <input
                 type="text"
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(e) => {
+                  setTopic(e.target.value);
+                  if (topicHint) setTopicHint(null);
+                }}
                 placeholder={activeRunIsRunning ? '已有问题正在生成。' : '输入一个困惑...'}
                 className="relative w-full px-5 py-4 pr-16 md:px-8 md:py-6 md:pr-20 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-300 focus:ring-0 focus:shadow-[0_8px_40px_rgb(0,0,0,0.08)] transition-all duration-300 placeholder:text-museum-300 font-serif text-left backdrop-blur-md disabled:opacity-70"
-                disabled={activeRunIsRunning}
+                disabled={activeRunIsRunning || isReframing}
               />
               <button
                 type="submit"
-                disabled={!topic || activeRunIsRunning}
+                disabled={!topic || activeRunIsRunning || isReframing}
                 className="absolute right-1.5 top-1.5 md:right-2 md:top-2 h-[calc(100%-12px)] md:h-[calc(100%-16px)] aspect-square bg-museum-900 text-museum-50 rounded-full flex items-center justify-center hover:bg-black transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group-hover:shadow-lg"
               >
-                {activeRunIsRunning ? <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight className="w-5 h-5 md:w-6 md:h-6" />}
+                {activeRunIsRunning || isReframing ? <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight className="w-5 h-5 md:w-6 md:h-6" />}
               </button>
             </form>
+
+            {topicHint && (
+              <div className="mt-4 w-full max-w-2xl mx-auto px-4 py-3 rounded-2xl border border-amber-200/80 bg-amber-50/85 backdrop-blur-sm text-left">
+                <p className="text-sm text-amber-900 leading-relaxed">{topicHint.message}</p>
+                {topicHint.suggestions && topicHint.suggestions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {topicHint.suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => {
+                          setTopic(suggestion);
+                          setTopicHint(null);
+                        }}
+                        className="px-3 py-1.5 bg-white/80 border border-amber-200 rounded-full text-xs text-amber-900 hover:bg-white hover:border-amber-400 transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mt-5 flex flex-col items-center gap-3">
               {activeRunIsRunning ? (
@@ -679,7 +949,7 @@ const App: React.FC = () => {
             {!API_CONFIGURED && (
               <div className="mt-8 md:mt-12 p-3 px-6 bg-red-50 text-red-800 rounded-full border border-red-100 inline-flex items-center gap-2 text-xs font-medium shadow-sm">
                 <Info className="w-3 h-3" />
-                <span>System Alert: Missing SOPHIA_API_KEY configuration.</span>
+                <span>未配置 API key：请到设置页填入自定义 LLM，或在部署环境补上 SOPHIA_API_KEY 后重新部署。</span>
               </div>
             )}
           </div>
@@ -695,10 +965,15 @@ const App: React.FC = () => {
             onBack={goHome}
             onRegeneratePreset={handleRegeneratePreset}
             canRegeneratePreset={!!API_CONFIGURED && !activeRunIsRunning}
+            onDownloadHistory={handleDownloadHistory}
+            onImportHistory={handleImportHistory}
+            onDeleteEntry={handleDeleteHistoryEntry}
           />
         )}
 
         {showManifesto && <ManifestoPage onBack={goHome} />}
+
+        {showSettings && <SettingsPage onBack={goHome} />}
 
         {showResult && (
           <>
@@ -711,8 +986,18 @@ const App: React.FC = () => {
             )}
 
             {displayedError && (
-              <div className="max-w-md mx-auto mt-8 text-center text-red-600 bg-red-50 p-4 rounded-lg border border-red-100">
-                <p className="font-serif">苏菲遇到了错误: {displayedError}</p>
+              <div className="max-w-md mx-auto mt-8 text-center text-red-700 bg-red-50 p-5 rounded-lg border border-red-100">
+                <p className="font-serif">苏菲遇到了错误：{displayedError}</p>
+                {selectedSource === 'active' && !activeRunIsRunning && (lastRunContextRef.current || activeRun?.topic) && (
+                  <button
+                    type="button"
+                    onClick={handleRegenerateAll}
+                    className="mt-3 px-5 py-2 bg-museum-900 text-museum-50 rounded-full text-sm font-serif hover:bg-black transition-colors disabled:opacity-50"
+                    disabled={isAppendingVoice || !!retryingVoiceId}
+                  >
+                    重新生成这份分析
+                  </button>
+                )}
               </div>
             )}
 
@@ -722,6 +1007,8 @@ const App: React.FC = () => {
                 onReset={goHome}
                 onFollowUp={handleFollowUp}
                 onAppendThoughtVoice={handleAppendThoughtVoice}
+                onRetryVoice={handleRetryVoice}
+                retryingVoiceId={retryingVoiceId}
                 isGenerating={selectedSource === 'active' && activeRunIsRunning}
                 isAppendingVoice={isAppendingVoice}
               />
@@ -734,6 +1021,15 @@ const App: React.FC = () => {
       <footer className="py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest relative z-10 opacity-60 hover:opacity-100 transition-opacity">
         <p>© 2026 Sophia's Dialectic. Powered by Sophia & The Ancients.</p>
       </footer>
+
+      <TopicReframeDialog
+        open={!!reframeState?.open}
+        originalTopic={reframeState?.originalTopic || ''}
+        candidates={reframeState?.candidates || []}
+        onPick={handleReframePick}
+        onKeepOriginal={handleReframeKeepOriginal}
+        onCancel={handleReframeCancel}
+      />
     </div>
   );
 };
