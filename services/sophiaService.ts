@@ -10,6 +10,7 @@ import {
   OpenConclusion,
   ProgramMode,
   RouteNode,
+  RunSnapshot,
   TensionFocus,
   ThoughtVoice,
   ThoughtVoiceImageAvatar,
@@ -1631,6 +1632,61 @@ export const analyzeTopic = async (
   } finally {
     popRunContext(ctx);
   }
+};
+
+/**
+ * Re-enter the analysis pipeline using a previously persisted RunSnapshot.
+ *
+ * The current implementation is intentionally tactical: it short-circuits the
+ * fully-finished case (lastCompletedStage === 'synthesis' just returns the
+ * partial result) and otherwise replays analyzeTopic from the top with the
+ * snapshot's topic + continuationContext. The optimization that lets us
+ * skip already-completed stages comes from the stage cache (Phase 4): once
+ * generateOutline / generateRouteDetails / generateVoiceEssay are
+ * fingerprint-cached, calling analyzeTopic again on a refresh will hit the
+ * cache for every stage that already finished and only redo what was
+ * unfinished — which is functionally what "resume from last completed
+ * stage" promises, without forcing analyzeTopic into a more invasive
+ * refactor.
+ *
+ * Returns the resulting AnalysisResult so the caller can persist it.
+ */
+export const resumeAnalysis = async (
+  snap: RunSnapshot,
+  callbacks: AnalyzeCallbacks = {},
+): Promise<AnalysisResult> => {
+  if (snap.lastCompletedStage === 'synthesis' && snap.partialResult) {
+    const completed = snap.partialResult.voices.filter((voice) => voice.status === 'completed').length;
+    callbacks.onProgress?.({
+      stage: 'done',
+      modeLabel: snap.partialResult.modeLabel,
+      totalVoices: snap.partialResult.voices.length,
+      completedVoices: completed,
+      messages: ['这份分析在上次离开前已经完成。'],
+    });
+    callbacks.onLog?.({
+      id: `resume-done-${Date.now()}`,
+      ts: new Date().toISOString(),
+      level: 'info',
+      stage: 'done',
+      message: '检测到这份分析已经完成，直接恢复结果。',
+    });
+    return snap.partialResult;
+  }
+
+  // Surface whatever the snapshot already had so the user sees the partial
+  // shape immediately while the pipeline restarts in the background.
+  if (snap.partialResult) {
+    callbacks.onLog?.({
+      id: `resume-restart-${Date.now()}`,
+      ts: new Date().toISOString(),
+      level: 'info',
+      stage: 'meta',
+      message: `正在从上次保存的进度（${snap.lastCompletedStage || '初始'} 阶段）继续。已缓存的阶段会直接命中，不会重跑。`,
+    });
+  }
+
+  return analyzeTopic(snap.topic, callbacks, snap.continuationContext);
 };
 
 export const generateQuestionSuggestions = async (seedTopic = ''): Promise<string[]> => {

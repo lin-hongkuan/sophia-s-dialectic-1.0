@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions, regenerateThoughtVoice } from './services/sophiaService';
-import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, ThoughtVoice, TokenUsage } from './types';
+import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions, regenerateThoughtVoice, resumeAnalysis } from './services/sophiaService';
+import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, RunSnapshot, RunSnapshotStage, ThoughtVoice, TokenUsage } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
 import RoundtableScene from './components/RoundtableScene';
@@ -24,6 +24,12 @@ import {
   getAvatarImages,
   putAvatarImage,
 } from './services/imageStore';
+import {
+  deleteRunSnapshot,
+  findMostRecentResumable,
+  pruneStaleRunSnapshots,
+  saveRunSnapshot,
+} from './services/runSnapshotStore';
 import TopicReframeDialog from './components/TopicReframeDialog';
 
 type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result' | 'concept';
@@ -424,6 +430,12 @@ const App: React.FC = () => {
   // already dismissed THIS announcement id).
   const [announcementOpen, setAnnouncementOpen] = useState(false);
   const [conceptTarget, setConceptTarget] = useState<{ analysisId: string; keywordId: string } | null>(null);
+  /**
+   * If we found a snapshot from a previous session that was still running
+   * when the page closed, hold it here so the home view can offer "继续上次
+   *未完成的分析？". Cleared once the user picks resume / dismiss.
+   */
+  const [pendingResumeSnap, setPendingResumeSnap] = useState<RunSnapshot | null>(null);
   const conceptBackRouteRef = useRef<AppRoute>('/');
   const activeRunIdRef = useRef<string | null>(null);
   const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
@@ -548,6 +560,14 @@ const App: React.FC = () => {
         const [hydratedPreset] = await hydrateEntriesWithAvatars([presetStored]);
         if (hydratedPreset !== presetStored) setPresetEntry(hydratedPreset);
       }
+    })();
+
+    // Async: prune day-old run snapshots, then surface the most recent
+    // resumable one (if any) so the home view can offer "继续上次未完成的分析".
+    void (async () => {
+      try { await pruneStaleRunSnapshots(); } catch { /* best-effort */ }
+      const snap = await findMostRecentResumable();
+      if (snap) setPendingResumeSnap(snap);
     })();
 
     const handlePopState = () => openRoute(normalizeRoute(window.location.pathname), true);
@@ -706,6 +726,31 @@ const App: React.FC = () => {
     });
   };
 
+  /**
+   * Persist a snapshot of the in-flight run to IndexedDB. We write at every
+   * stage boundary (outline → route → after each voice → synthesis) so a
+   * refresh / crash leaves something for the next mount to offer as resume.
+   * Stage cache (Phase 4) makes the rerun-from-resume close to free.
+   */
+  const writeRunSnapshot = (
+    run: ActiveAnalysisRun,
+    lastCompletedStage: RunSnapshotStage | null,
+    continuationContext?: ContinuationContext,
+  ) => {
+    void saveRunSnapshot({
+      runId: run.runId,
+      topic: run.topic,
+      createdAt: run.createdAt,
+      updatedAt: new Date().toISOString(),
+      status: run.status,
+      lastCompletedStage,
+      partialResult: run.result,
+      continuationContext,
+      isPresetRegeneration: run.isPresetRegeneration,
+      log: run.log,
+    });
+  };
+
   const updateDisplayedResult = (updater: (result: AnalysisResult) => AnalysisResult) => {
     if (selectedSource === 'active') {
       setActiveRun((current) => current?.result ? { ...current, result: updater(current.result) } : current);
@@ -748,6 +793,21 @@ const App: React.FC = () => {
       log: [],
     });
 
+    // Initial "we are starting" snapshot — covers the case where the user
+    // refreshes during the very first outline call (before any callback fires).
+    void saveRunSnapshot({
+      runId,
+      topic: trimmedTopic,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'starting',
+      lastCompletedStage: null,
+      partialResult: null,
+      continuationContext,
+      isPresetRegeneration,
+      log: [],
+    });
+
     const throttle = createVoiceStreamThrottle((voiceId, fullText) => {
       updateActiveRun(runId, (run) => run.result ? {
         ...run,
@@ -761,8 +821,17 @@ const App: React.FC = () => {
     try {
       const data = await analyzeTopic(trimmedTopic, {
         onProgress: (progress) => updateActiveRun(runId, (run) => ({ ...run, status: progress.stage === 'done' ? run.status : 'running', progress })),
-        onOutline: (outline) => updateActiveRun(runId, (run) => ({ ...run, status: 'running', result: createPartialResult(outline), error: null })),
-        onRouteMap: (routeMap) => updateActiveRun(runId, (run) => run.result ? { ...run, result: { ...run.result, routeMap } } : run),
+        onOutline: (outline) => updateActiveRun(runId, (run) => {
+          const next: ActiveAnalysisRun = { ...run, status: 'running', result: createPartialResult(outline), error: null };
+          writeRunSnapshot(next, 'outline', continuationContext);
+          return next;
+        }),
+        onRouteMap: (routeMap) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          const next: ActiveAnalysisRun = { ...run, result: { ...run.result, routeMap } };
+          writeRunSnapshot(next, 'route', continuationContext);
+          return next;
+        }),
         onVoiceStart: (voiceId) => updateActiveRun(runId, (run) => run.result ? {
           ...run,
           result: {
@@ -774,15 +843,27 @@ const App: React.FC = () => {
         onVoiceStep: (voiceId, _voiceName, _message) => throttle.flush(voiceId),
         onVoiceComplete: (voice: ThoughtVoice) => {
           throttle.clearOne(voice.id);
-          updateActiveRun(runId, (run) => run.result ? {
-            ...run,
-            result: {
-              ...run.result,
-              voices: run.result.voices.map((item) => item.id === voice.id ? voice : item),
-            },
-          } : run);
+          updateActiveRun(runId, (run) => {
+            if (!run.result) return run;
+            const next: ActiveAnalysisRun = {
+              ...run,
+              result: {
+                ...run.result,
+                voices: run.result.voices.map((item) => item.id === voice.id ? voice : item),
+              },
+            };
+            // Snapshot stays at lastCompletedStage='route' until synthesis finishes;
+            // the partialResult.voices array reflects which voices already completed.
+            writeRunSnapshot(next, 'route', continuationContext);
+            return next;
+          });
         },
-        onSynthesis: (partial) => updateActiveRun(runId, (run) => run.result ? { ...run, result: { ...run.result, ...partial } } : run),
+        onSynthesis: (partial) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          const next: ActiveAnalysisRun = { ...run, result: { ...run.result, ...partial } };
+          writeRunSnapshot(next, 'synthesis', continuationContext);
+          return next;
+        }),
         onError: (message) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] } })),
         onLog: (entry: GenerationLogEntry) => updateActiveRun(runId, (run) => ({ ...run, log: [...run.log, entry] })),
         onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
@@ -803,6 +884,10 @@ const App: React.FC = () => {
         error: null,
       }));
 
+      // The run finished — drop the snapshot. The history entry takes over as
+      // the durable record of this analysis.
+      void deleteRunSnapshot(runId);
+
       if (isPresetRegeneration) {
         persistGeneratedPreset(data);
       } else {
@@ -811,12 +896,18 @@ const App: React.FC = () => {
     } catch (err) {
       throttle.clearAll();
       const message = err instanceof Error ? err.message : '发生了未知错误';
-      updateActiveRun(runId, (run) => ({
-        ...run,
-        status: 'error',
-        error: message,
-        progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] },
-      }));
+      updateActiveRun(runId, (run) => {
+        const next: ActiveAnalysisRun = {
+          ...run,
+          status: 'error',
+          error: message,
+          progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] },
+        };
+        // Mark snapshot as errored — pruneStaleRunSnapshots will clean it out
+        // eventually; findMostRecentResumable already filters non-running.
+        writeRunSnapshot(next, null, continuationContext);
+        return next;
+      });
     }
   };
 
@@ -1107,6 +1198,142 @@ const App: React.FC = () => {
     startAnalysis(PRESET_TOPIC, undefined, true);
   };
 
+  /**
+   * Pick up a snapshot from a previous session. We mirror the snapshot's
+   * partial result into activeRun so the user lands on the roundtable with
+   * whatever was already produced, then call resumeAnalysis under the same
+   * callback shape as startAnalysis. The stage cache (Phase 4) will turn
+   * already-completed stages into instant cache hits, so resuming is fast.
+   */
+  const resumeRun = async (snap: RunSnapshot) => {
+    if (activeRunIsRunning) {
+      openActiveRun();
+      return;
+    }
+    setPendingResumeSnap(null);
+
+    const { runId, topic: snapTopic, continuationContext, isPresetRegeneration } = snap;
+    activeRunIdRef.current = runId;
+    lastRunContextRef.current = { topic: snapTopic, continuationContext, isPresetRegeneration };
+    setTopic(snapTopic);
+    setSelectedHistoryResult(null);
+    setSelectedSource('active');
+    setView('result');
+    setActiveRun({
+      runId,
+      topic: snapTopic,
+      createdAt: snap.createdAt,
+      status: 'running',
+      result: snap.partialResult,
+      progress: {
+        stage: snap.lastCompletedStage === 'synthesis' ? 'done' : snap.lastCompletedStage === 'route' ? 'voices' : snap.lastCompletedStage === 'outline' ? 'route' : 'outline',
+        modeLabel: snap.partialResult?.modeLabel,
+        totalVoices: snap.partialResult?.voices.length || 0,
+        completedVoices: snap.partialResult?.voices.filter((v) => v.status === 'completed').length || 0,
+        messages: ['正在恢复上次的进度...'],
+      },
+      error: null,
+      isPresetRegeneration,
+      log: snap.log,
+    });
+
+    const throttle = createVoiceStreamThrottle((voiceId, fullText) => {
+      updateActiveRun(runId, (run) => run.result ? {
+        ...run,
+        result: {
+          ...run.result,
+          voices: run.result.voices.map((voice) => voice.id === voiceId ? { ...voice, argument: fullText, status: 'generating' } : voice),
+        },
+      } : run);
+    });
+
+    try {
+      const data = await resumeAnalysis(snap, {
+        onProgress: (progress) => updateActiveRun(runId, (run) => ({ ...run, status: progress.stage === 'done' ? run.status : 'running', progress })),
+        onOutline: (outline) => updateActiveRun(runId, (run) => {
+          const next: ActiveAnalysisRun = { ...run, status: 'running', result: createPartialResult(outline), error: null };
+          writeRunSnapshot(next, 'outline', continuationContext);
+          return next;
+        }),
+        onRouteMap: (routeMap) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          const next: ActiveAnalysisRun = { ...run, result: { ...run.result, routeMap } };
+          writeRunSnapshot(next, 'route', continuationContext);
+          return next;
+        }),
+        onVoiceStart: (voiceId) => updateActiveRun(runId, (run) => run.result ? {
+          ...run,
+          result: {
+            ...run.result,
+            voices: run.result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating' } : voice),
+          },
+        } : run),
+        onVoiceDelta: (voiceId, _delta, fullText) => throttle.schedule(voiceId, fullText),
+        onVoiceStep: (voiceId, _voiceName, _message) => throttle.flush(voiceId),
+        onVoiceComplete: (voice: ThoughtVoice) => {
+          throttle.clearOne(voice.id);
+          updateActiveRun(runId, (run) => {
+            if (!run.result) return run;
+            const next: ActiveAnalysisRun = {
+              ...run,
+              result: {
+                ...run.result,
+                voices: run.result.voices.map((item) => item.id === voice.id ? voice : item),
+              },
+            };
+            writeRunSnapshot(next, 'route', continuationContext);
+            return next;
+          });
+        },
+        onSynthesis: (partial) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          const next: ActiveAnalysisRun = { ...run, result: { ...run.result, ...partial } };
+          writeRunSnapshot(next, 'synthesis', continuationContext);
+          return next;
+        }),
+        onError: (message) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] } })),
+        onLog: (entry: GenerationLogEntry) => updateActiveRun(runId, (run) => ({ ...run, log: [...run.log, entry] })),
+        onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
+      });
+
+      throttle.clearAll();
+      updateActiveRun(runId, (run) => ({
+        ...run,
+        status: 'completed',
+        result: data,
+        progress: {
+          stage: 'done',
+          modeLabel: data.modeLabel,
+          totalVoices: data.voices.length,
+          completedVoices: data.voices.filter((voice) => voice.status === 'completed').length,
+          messages: ['这份哲学分析已生成完成。'],
+        },
+        error: null,
+      }));
+      void deleteRunSnapshot(runId);
+      if (isPresetRegeneration) persistGeneratedPreset(data);
+      else persistResult(data);
+    } catch (err) {
+      throttle.clearAll();
+      const message = err instanceof Error ? err.message : '发生了未知错误';
+      updateActiveRun(runId, (run) => {
+        const next: ActiveAnalysisRun = {
+          ...run,
+          status: 'error',
+          error: message,
+          progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] },
+        };
+        writeRunSnapshot(next, null, continuationContext);
+        return next;
+      });
+    }
+  };
+
+  const handleDismissResumePrompt = (snap: RunSnapshot) => {
+    setPendingResumeSnap(null);
+    void deleteRunSnapshot(snap.runId);
+  };
+
   return (
     <div className="min-h-screen flex flex-col font-sans text-museum-900 overflow-x-hidden relative">
       <DynamicBackground showFrontOcclusion={showHome} />
@@ -1275,6 +1502,36 @@ const App: React.FC = () => {
             {showActiveBanner && activeRun && (
               <div className="relative z-30 mt-10 md:mt-16 w-full">
                 <ActiveRunBanner activeRun={activeRun} onOpen={openActiveRun} />
+              </div>
+            )}
+
+            {pendingResumeSnap && !activeRun && (
+              <div className="relative z-30 mt-8 md:mt-12 w-full max-w-3xl mx-auto bg-white/90 backdrop-blur-md border border-museum-300 shadow-sm p-5 md:p-6">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-museum-500 mb-1">未完成的分析</p>
+                    <p className="font-serif text-museum-900 text-base md:text-lg leading-snug truncate">{pendingResumeSnap.partialResult?.philosophical_title || pendingResumeSnap.topic}</p>
+                    <p className="text-xs text-museum-500 mt-1">
+                      上次在 {pendingResumeSnap.lastCompletedStage === 'synthesis' ? '综合判断' : pendingResumeSnap.lastCompletedStage === 'route' ? '生成思想声音' : pendingResumeSnap.lastCompletedStage === 'outline' ? '生成论证路线' : '整理问题结构'} 阶段中断。
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDismissResumePrompt(pendingResumeSnap)}
+                      className="px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-600 hover:text-museum-900 transition-colors"
+                    >
+                      放弃
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resumeRun(pendingResumeSnap)}
+                      className="px-4 py-2 text-xs font-mono uppercase tracking-widest bg-museum-900 text-museum-50 hover:bg-black transition-colors"
+                    >
+                      继续上次的分析
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
