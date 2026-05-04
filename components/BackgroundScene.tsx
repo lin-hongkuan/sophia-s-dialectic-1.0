@@ -167,7 +167,7 @@ const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = 
       </div>
 
       {showFrontOcclusion && (
-        <div className="hero-front-occlusion-canvas fixed inset-0 z-20 opacity-30 pointer-events-none">
+        <div className="hero-front-occlusion-canvas fixed inset-0 z-20 pointer-events-none">
           <Canvas
             camera={{ position: [0, 0, 6], fov: 45 }}
             gl={GL_OPTIONS}

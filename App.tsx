@@ -1165,7 +1165,7 @@ const App: React.FC = () => {
                 </HangingLabel>
               </div>
 
-              <div className="hero-copy-blend-target relative z-10">
+              <div className="relative z-10">
                 <h1 className="font-serif text-4xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.92] sm:leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
                   Sophia's<br />
                   <span className="italic relative inline-block">
