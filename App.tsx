@@ -3,6 +3,7 @@ import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestion
 import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, ThoughtVoice, TokenUsage } from './types';
 import Arena from './components/Arena';
 import ReasoningDisplay from './components/ReasoningDisplay';
+import RoundtableScene from './components/RoundtableScene';
 import DynamicBackground from './components/DynamicBackground';
 import HistoryPage from './components/HistoryPage';
 import ManifestoPage from './components/ManifestoPage';
@@ -1309,10 +1310,11 @@ const App: React.FC = () => {
         {showResult && (
           <>
             {selectedSource === 'active' && (
-              <ReasoningDisplay
+              <RoundtableScene
                 isAnalyzing={activeRunIsRunning}
                 isFinished={!activeRunIsRunning && !!displayedResult && displayedProgress?.stage === 'done'}
                 progress={displayedProgress}
+                result={displayedResult}
                 log={activeRun?.log}
               />
             )}
