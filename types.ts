@@ -11,7 +11,7 @@ export type ProgramMode =
   | 'custom';
 
 export type VoiceKind = 'philosopher' | 'school' | 'concept' | 'position' | 'contemporary';
-export type VoiceStatus = 'queued' | 'generating' | 'completed' | 'failed';
+export type VoiceStatus = 'queued' | 'generating' | 'completed' | 'failed' | 'cancelled';
 
 export interface QuestionFrame {
   original: string;
@@ -113,11 +113,32 @@ export interface TensionFocus {
   relatedVoiceIds: string[];
 }
 
+export interface KeywordRepresentativeFigure {
+  name: string;
+  oneLine: string;
+}
+
 export interface KeywordExplainer {
   id: string;
   term: string;
   meaning: string;
   importance: string;
+  /** Academic / school definition. Optional — older entries may not have it. */
+  definition?: string;
+  /** Common misconception users carry into the term. */
+  misconception?: string;
+  /** Two or three representative thinkers, each with a one-line stance. */
+  representativeFigures?: KeywordRepresentativeFigure[];
+  /** How the concept reshapes the current question — analysis-specific. */
+  relationToQuestion?: string;
+  /** A concrete everyday example illustrating the concept. */
+  lifeExample?: string;
+  /** A counter-question that flips the user's intuition. */
+  challengeQuestion?: string;
+  /** 3-5 short pointers (book / essay / movement names) for further reading. */
+  furtherReading?: string[];
+  /** True only after enrichKeyword has filled the long-form fields. */
+  enriched?: boolean;
 }
 
 export interface FollowUpQuestion {
@@ -161,7 +182,8 @@ export type TokenUsageStage =
   | 'append'
   | 'reflection'
   | 'suggestion'
-  | 'avatar';
+  | 'avatar'
+  | 'keyword_enrich';
 
 export interface TokenUsage {
   promptTokens: number;
@@ -269,7 +291,7 @@ export interface ContinuationContext {
   selectedFollowUpReason?: string;
 }
 
-export type AnalysisRunStatus = 'starting' | 'running' | 'completed' | 'error';
+export type AnalysisRunStatus = 'starting' | 'running' | 'completed' | 'error' | 'cancelled';
 
 export interface ActiveAnalysisRun {
   runId: string;
@@ -293,6 +315,75 @@ export interface HistoryEntry {
   result: AnalysisResult;
   isPreset?: boolean;
   generatedByChain?: boolean;
+}
+
+/**
+ * One of the four pipeline stages that can be "completed" — used by the
+ * snapshot system to know where to resume from after a refresh or abort.
+ * 'synthesis' as the lastCompletedStage means the run is effectively done.
+ */
+export type RunSnapshotStage = 'outline' | 'route' | 'voices' | 'synthesis';
+
+/**
+ * Persisted shape of an in-flight (or just-finished) analysis run. Written
+ * incrementally to IndexedDB at every stage boundary so a refresh / crash /
+ * cancel can resume from the most recent committed stage instead of redoing
+ * the whole pipeline.
+ */
+export interface RunSnapshot {
+  runId: string;
+  topic: string;
+  createdAt: string;
+  /** Last write timestamp; used for TTL cleanup. */
+  updatedAt: string;
+  status: AnalysisRunStatus;
+  /** null when nothing has finished yet (still in initial outline call). */
+  lastCompletedStage: RunSnapshotStage | null;
+  /**
+   * Whatever the orchestrator has produced so far — outline-derived
+   * placeholder, partially streamed voices, or full result. Mirrors what
+   * Arena / RoundtableScene would render right now.
+   */
+  partialResult: AnalysisResult | null;
+  continuationContext?: ContinuationContext;
+  isPresetRegeneration?: boolean;
+  log: GenerationLogEntry[];
+}
+
+/**
+ * Hooks the App layer hands to analyzeTopic / resumeAnalysis so the user can
+ * (a) abort the whole pipeline, (b) skip individual voices that haven't
+ * started yet, and (c) inject new voice plans into the queue mid-run. The
+ * service treats all three as best-effort — each is checked at safe points
+ * inside the orchestrator (between stages, before each voice worker picks up
+ * its next item).
+ */
+export interface AnalyzeControl {
+  /** Aborting this signal cancels every in-flight fetch and exits the orchestrator. */
+  signal: AbortSignal;
+  /** Polled before a worker starts a voice; true → mark cancelled and skip. */
+  shouldSkipVoice?: (voiceId: string) => boolean;
+  /**
+   * Drained by the voices stage at safe points. Push a fully-formed voicePlan
+   * here from the UI and the orchestrator will pick it up on the next poll.
+   * The plan is consumed (shifted) once scheduled.
+   */
+  voiceQueue?: ThoughtVoice[];
+}
+
+/**
+ * User-authored note attached to an analysis (and optionally to a specific
+ * voice or concept inside it). Stored fully locally — the offline read-only
+ * mode treats these as first-class content alongside the generated analysis.
+ */
+export interface ReflectionNote {
+  id: string;
+  analysisId: string;
+  voiceId?: string;
+  conceptId?: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Message {
