@@ -1108,7 +1108,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col font-sans text-museum-900 overflow-x-hidden relative isolate">
+    <div className="min-h-screen flex flex-col font-sans text-museum-900 overflow-x-hidden relative">
       <DynamicBackground showFrontOcclusion={showHome} />
 
       <nav className="fixed w-full top-0 z-50 bg-museum-50/60 backdrop-blur-sm border-b border-museum-200/50 transition-all duration-300">

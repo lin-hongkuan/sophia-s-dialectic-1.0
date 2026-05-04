@@ -20,16 +20,6 @@
   animation: fade-in 0.6s ease-out forwards;
 }
 
-.hero-front-occlusion-canvas {
-  mix-blend-mode: difference;
-}
-
-@supports not (mix-blend-mode: difference) {
-  .hero-front-occlusion-canvas {
-    mix-blend-mode: normal;
-  }
-}
-
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
