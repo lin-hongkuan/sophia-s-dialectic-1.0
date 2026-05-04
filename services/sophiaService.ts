@@ -771,18 +771,67 @@ const normalizeTensions = (value: unknown): TensionFocus[] =>
     })
     : [];
 
-const normalizeKeywords = (value: unknown): KeywordExplainer[] =>
-  Array.isArray(value)
-    ? value.map((item, index) => {
-      const source = isRecord(item) ? item : {};
-      return {
-        id: toText(source.id, `keyword-${index + 1}`),
-        term: toText(source.term, `关键词 ${index + 1}`),
-        meaning: toText(source.meaning),
-        importance: toText(source.importance),
-      };
+const normalizeRepresentativeFigures = (value: unknown): KeywordExplainer['representativeFigures'] => {
+  if (!Array.isArray(value)) return undefined;
+  const figures = value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const name = toText(item.name).trim();
+      if (!name) return null;
+      return { name, oneLine: toText(item.oneLine).trim() };
     })
-    : [];
+    .filter((entry): entry is { name: string; oneLine: string } => entry !== null);
+  return figures.length > 0 ? figures : undefined;
+};
+
+const optionalText = (value: unknown): string | undefined => {
+  const text = toText(value).trim();
+  return text || undefined;
+};
+
+const optionalTextArray = (value: unknown): string[] | undefined => {
+  const arr = toTextArray(value).map((entry) => entry.trim()).filter(Boolean);
+  return arr.length > 0 ? arr : undefined;
+};
+
+const isKeywordEnriched = (kw: Pick<KeywordExplainer, 'definition' | 'misconception' | 'representativeFigures' | 'relationToQuestion' | 'lifeExample' | 'challengeQuestion' | 'furtherReading'>): boolean => {
+  // Treat the keyword as "enriched" only when at least 4 of the 7 long-form
+  // fields are present. Synthesis often returns 6-7; older / partial results
+  // returning 0-3 should still trigger the enrichment LLM call.
+  let count = 0;
+  if (kw.definition) count += 1;
+  if (kw.misconception) count += 1;
+  if (kw.representativeFigures && kw.representativeFigures.length > 0) count += 1;
+  if (kw.relationToQuestion) count += 1;
+  if (kw.lifeExample) count += 1;
+  if (kw.challengeQuestion) count += 1;
+  if (kw.furtherReading && kw.furtherReading.length > 0) count += 1;
+  return count >= 4;
+};
+
+const normalizeKeyword = (item: unknown, index: number): KeywordExplainer => {
+  const source = isRecord(item) ? item : {};
+  const definition = optionalText(source.definition);
+  const misconception = optionalText(source.misconception);
+  const representativeFigures = normalizeRepresentativeFigures(source.representativeFigures);
+  const relationToQuestion = optionalText(source.relationToQuestion);
+  const lifeExample = optionalText(source.lifeExample);
+  const challengeQuestion = optionalText(source.challengeQuestion);
+  const furtherReading = optionalTextArray(source.furtherReading);
+  const explicitEnriched = typeof source.enriched === 'boolean' ? source.enriched : undefined;
+  const longForm = { definition, misconception, representativeFigures, relationToQuestion, lifeExample, challengeQuestion, furtherReading };
+  return {
+    id: toText(source.id, `keyword-${index + 1}`),
+    term: toText(source.term, `关键词 ${index + 1}`),
+    meaning: toText(source.meaning),
+    importance: toText(source.importance),
+    ...longForm,
+    enriched: explicitEnriched ?? isKeywordEnriched(longForm),
+  };
+};
+
+const normalizeKeywords = (value: unknown): KeywordExplainer[] =>
+  Array.isArray(value) ? value.map(normalizeKeyword) : [];
 
 const normalizeFollowUps = (value: unknown): AnalysisResult['followUps'] =>
   Array.isArray(value)
@@ -1024,14 +1073,27 @@ ${voices.map((v) => `${v.name}: ${v.summaryForSynthesis}`).join('\n')}
 输出 JSON：
 {
   "tensions": [{"id":"tension-1","title":"他们到底在争什么","content":"220-320字，解释这几个声音之间真正在争什么；必须是声音之间的真实分歧，不要逐个复述每个声音的立场","relatedVoiceIds":["voice-id"]}],
-  "keywords": [{"id":"keyword-1","term":"关键词","meaning":"这个词是什么意思","importance":"它在这个问题里为什么重要"}],
+  "keywords": [{
+    "id":"keyword-1",
+    "term":"关键词",
+    "meaning":"30-60字的日常解释，让没读过哲学的人也能立刻理解",
+    "importance":"30-80字，说明它在这个问题里为什么重要",
+    "definition":"60-120字的学理化定义，可以引出概念背景",
+    "misconception":"40-80字，常见误解或望文生义",
+    "representativeFigures":[{"name":"代表人物或学派","oneLine":"一句话立场"}],
+    "relationToQuestion":"60-120字，这个概念在当前分析里如何转动问题",
+    "lifeExample":"40-80字的生活例子，避免抽象重复",
+    "challengeQuestion":"一句反问，能让用户重新审视自己的直觉",
+    "furtherReading":["《代表书目1》","《代表书目2》"]
+  }],
   "followUps": [{"id":"follow-1","question":"承接当前分析的继续追问","reason":"说明它如何接着当前分歧、关键词或结论往下走"}],
   "conclusion": {"summary":"综合判断，400-700字","openQuestion":"仍然悬而未决的问题","realLifeReturn":"回到用户现实处境，200-350字"}
 }
 
-followUps 必须是对当前分析的延伸，不要像另一个全新选题。tensions 至少 2 条；如果声音之间没有真实分歧，要诚实指出"这几位在该问题上有共识、分歧出现在更细的环节"。`,
+followUps 必须是对当前分析的延伸，不要像另一个全新选题。tensions 至少 2 条；如果声音之间没有真实分歧，要诚实指出"这几位在该问题上有共识、分歧出现在更细的环节"。
+keywords 至少 3 条；每条都必须填齐七个长字段（definition / misconception / representativeFigures / relationToQuestion / lifeExample / challengeQuestion / furtherReading），不要为了凑数复述其他字段。representativeFigures 至少 1 项；furtherReading 至少 2 项书目或思想方向。`,
     },
-  ], 3500).catch(() => fallback);
+  ], 5500).catch(() => fallback);
 
   return {
     tensions: normalizeTensions(raw.tensions),
@@ -1680,6 +1742,90 @@ export const getReflectionFeedback = async (result: AnalysisResult, userReflecti
   } catch (error) {
     console.error('Reflection feedback error:', error);
     return 'Sophia 暂时无法回应，请稍后再试。';
+  } finally {
+    popRunContext(ctx);
+  }
+};
+
+/**
+ * Fill in any missing long-form fields on a single KeywordExplainer using a
+ * scoped LLM call. Synthesis already asks for the full schema, but older
+ * stored entries (or runs where synthesis got truncated) can still arrive
+ * with only term/meaning/importance — the concept detail page calls this
+ * lazily on first open and the result is then written back into history.
+ *
+ * Returns a brand new keyword object. The caller is responsible for
+ * persisting it back into the appropriate AnalysisResult.
+ */
+export const enrichKeyword = async (
+  result: AnalysisResult,
+  keywordId: string,
+): Promise<KeywordExplainer> => {
+  const target = result.keywords.find((k) => k.id === keywordId);
+  if (!target) throw new Error(`关键词 ${keywordId} 不存在`);
+  if (target.enriched) return target;
+
+  const ctx = pushRunContext({
+    stage: 'keyword_enrich',
+    onTokenUsage: (usage) => recordUsageStandalone(usage),
+  });
+  try {
+    const otherKeywords = result.keywords
+      .filter((k) => k.id !== keywordId)
+      .map((k) => `${k.term}: ${k.meaning}`)
+      .join('\n');
+    const tensionsSummary = result.tensions
+      .map((tension) => `${tension.title}: ${tension.content}`)
+      .join('\n') || '无';
+
+    const raw = await callChatJson<Partial<KeywordExplainer>>([
+      {
+        role: 'system',
+        content: '你是 Sophia 的概念档案编辑。把单个关键词扩写成完整的概念卡。所有用户可见内容必须是简体中文。仅输出有效 JSON，不要 markdown，不要 JSON 前后任何文字。',
+      },
+      {
+        role: 'user',
+        content: `当前分析标题：${result.philosophical_title}
+原始问题：${result.topic}
+核心问题：${result.questionFrame.bigQuestion}
+分析路径：${result.modeLabel}
+本分析中的其他关键词：
+${otherKeywords || '无'}
+本分析的核心分歧：
+${tensionsSummary}
+本分析的综合判断：${result.conclusion.summary || '无'}
+
+需要扩写的概念：
+- 词目：${target.term}
+- 当前简短解释：${target.meaning || '（暂无）'}
+- 当前重要性说明：${target.importance || '（暂无）'}
+
+请补全这个概念的完整档案。要求：
+1. relationToQuestion 必须紧扣"在 ${result.philosophical_title} 这场分析里"，不要泛谈。
+2. representativeFigures 至少 1 项，最多 4 项；优先列出与本分析声音相关的人物/学派。
+3. lifeExample 不要重复 meaning 已有的例子。
+4. challengeQuestion 是一个反问句，能让用户怀疑自己原本对该概念的直觉。
+5. furtherReading 至少 2 项；可以是书目、论文标题、思想流派或重要论争。
+6. 全部字段必须填，不能空字符串。
+
+输出 JSON：
+{
+  "term": "${target.term}",
+  "meaning": "30-60字日常解释",
+  "importance": "30-80字重要性",
+  "definition": "60-120字学理化定义",
+  "misconception": "40-80字常见误解",
+  "representativeFigures": [{"name":"人物或学派","oneLine":"一句话立场"}],
+  "relationToQuestion": "60-120字与本分析的关系",
+  "lifeExample": "40-80字生活例子",
+  "challengeQuestion": "一句反问",
+  "furtherReading": ["《代表书目1》", "《代表书目2》"]
+}`,
+      },
+    ], 1600);
+
+    const next = normalizeKeyword({ ...target, ...raw, id: target.id }, 0);
+    return { ...next, enriched: isKeywordEnriched(next) };
   } finally {
     popRunContext(ctx);
   }

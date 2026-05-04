@@ -7,6 +7,7 @@ import DynamicBackground from './components/DynamicBackground';
 import HistoryPage from './components/HistoryPage';
 import ManifestoPage from './components/ManifestoPage';
 import SettingsPage from './components/SettingsPage';
+import ConceptDetailPage from './components/ConceptDetailPage';
 import ActiveRunBanner from './components/ActiveRunBanner';
 import AnnouncementModal from './components/AnnouncementModal';
 import { HangingLabel } from './components/PageHero';
@@ -24,9 +25,9 @@ import {
 } from './services/imageStore';
 import TopicReframeDialog from './components/TopicReframeDialog';
 
-type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result';
+type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result' | 'concept';
 type SelectedSource = 'active' | 'history' | null;
-type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}`;
+type AppRoute = '/' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}` | `/concept/${string}/${string}`;
 
 const HISTORY_KEY = 'sophia.history.v1';
 const ANNOUNCEMENT_DISMISSED_KEY = 'sophia.announcement.dismissed.v1';
@@ -56,6 +57,7 @@ const makeRunId = () => {
 
 const normalizeRoute = (pathname: string): AppRoute => {
   if (ROUTES[pathname]) return ROUTES[pathname];
+  if (/^\/concept\/[^/]+\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
   if (/^\/history\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
   return '/';
 };
@@ -72,6 +74,16 @@ const historyItemRoute = (entry: HistoryEntry): AppRoute => {
 };
 
 const routeHistoryId = (route: AppRoute) => route.startsWith('/history/') ? decodeURIComponent(route.slice('/history/'.length)) : '';
+
+const parseConceptRoute = (route: AppRoute): { analysisId: string; keywordId: string } | null => {
+  if (!route.startsWith('/concept/')) return null;
+  const [analysisRaw, keywordRaw] = route.slice('/concept/'.length).split('/');
+  if (!analysisRaw || !keywordRaw) return null;
+  return { analysisId: decodeURIComponent(analysisRaw), keywordId: decodeURIComponent(keywordRaw) };
+};
+
+const conceptRoute = (analysisId: string, keywordId: string): AppRoute =>
+  `/concept/${encodeURIComponent(analysisId)}/${encodeURIComponent(keywordId)}` as AppRoute;
 
 const loadHistory = (): HistoryEntry[] => {
   try {
@@ -410,6 +422,8 @@ const App: React.FC = () => {
   // mount seeds it from localStorage (auto-show only when the visitor hasn't
   // already dismissed THIS announcement id).
   const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [conceptTarget, setConceptTarget] = useState<{ analysisId: string; keywordId: string } | null>(null);
+  const conceptBackRouteRef = useRef<AppRoute>('/');
   const activeRunIdRef = useRef<string | null>(null);
   const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
 
@@ -433,6 +447,15 @@ const App: React.FC = () => {
         setPresetEntry(hydratedPreset);
         setSelectedHistoryResult(hydratedPreset.result);
       });
+      return;
+    }
+
+    const conceptTargetFromRoute = parseConceptRoute(route);
+    if (conceptTargetFromRoute) {
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setConceptTarget(conceptTargetFromRoute);
+      setView('concept');
       return;
     }
 
@@ -541,6 +564,7 @@ const App: React.FC = () => {
   const showManifesto = view === 'manifesto';
   const showSettings = view === 'settings';
   const showResult = view === 'result';
+  const showConcept = view === 'concept';
   const isViewingActiveRun = showResult && selectedSource === 'active';
   const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
   // Hide the announcement modal whenever the reframe modal is open so the
@@ -607,6 +631,42 @@ const App: React.FC = () => {
     setPresetEntry(entry);
   };
 
+  /**
+   * Locate an analysis result by id across the four places it might live:
+   * the in-flight active run, the user's history list, the regenerated
+   * preset (if any), and the bundled preloaded sample.
+   */
+  const findAnalysisResultById = (analysisId: string): AnalysisResult | null => {
+    if (activeRun?.result?.id === analysisId) return activeRun.result;
+    if (presetEntry.result.id === analysisId) return presetEntry.result;
+    const fromHistory = historyEntries.find((entry) => entry.id === analysisId);
+    if (fromHistory) return fromHistory.result;
+    if (PRELOADED_HISTORY_ENTRY.result.id === analysisId) return PRELOADED_HISTORY_ENTRY.result;
+    return null;
+  };
+
+  /**
+   * Persist a result whose keywords have just been enriched. Routes to the
+   * matching persistence path (active run state, preset cache, or normal
+   * history). The bundled preloaded sample is read-only at runtime, so an
+   * enrichment against it stays in-memory only.
+   */
+  const handleKeywordEnriched = (updatedResult: AnalysisResult) => {
+    const analysisId = updatedResult.id;
+    if (activeRun?.result?.id === analysisId) {
+      setActiveRun((current) => current?.result ? { ...current, result: updatedResult } : current);
+    }
+    if (presetEntry.result.id === analysisId) {
+      persistGeneratedPreset(updatedResult);
+      return;
+    }
+    if (historyEntries.some((entry) => entry.id === analysisId)) {
+      persistResult(updatedResult);
+      return;
+    }
+    // Otherwise (e.g. preloaded sample), no persistence — page state already updated.
+  };
+
   const openActiveRun = () => {
     if (!activeRun) return;
     setSelectedSource('active');
@@ -618,6 +678,24 @@ const App: React.FC = () => {
   const goHistory = () => openRoute('/history');
   const goManifesto = () => openRoute('/manifesto');
   const goSettings = () => openRoute('/settings');
+
+  /**
+   * Open the concept detail page for one keyword inside an analysis.
+   *
+   * `fromRoute` is the route the user came from; we keep it in a ref so the
+   * "回到分析" button can return them to the same analysis page they clicked
+   * "查看完整概念" on (active run, normal history entry, or preloaded sample).
+   */
+  const goToConcept = (analysisId: string, keywordId: string, fromRoute?: AppRoute) => {
+    if (fromRoute) conceptBackRouteRef.current = fromRoute;
+    else if (typeof window !== 'undefined') conceptBackRouteRef.current = normalizeRoute(window.location.pathname);
+    openRoute(conceptRoute(analysisId, keywordId));
+  };
+
+  const goConceptBack = () => {
+    const target = conceptBackRouteRef.current || '/';
+    openRoute(target);
+  };
 
   const updateActiveRun = (runId: string, updater: (run: ActiveAnalysisRun) => ActiveAnalysisRun) => {
     if (activeRunIdRef.current !== runId) return;
@@ -1029,7 +1107,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col font-sans text-museum-900 overflow-x-hidden relative">
+    <div className="min-h-screen flex flex-col font-sans text-museum-900 overflow-x-hidden relative isolate">
       <DynamicBackground showFrontOcclusion={showHome} />
 
       <nav className="fixed w-full top-0 z-50 bg-museum-50/60 backdrop-blur-sm border-b border-museum-200/50 transition-all duration-300">
@@ -1075,24 +1153,27 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      <main className="flex-grow pt-20 md:pt-24 px-4 relative z-10 flex flex-col">
+      <main className="flex-grow pt-20 md:pt-24 px-4 relative flex flex-col">
         <AppErrorBoundary resetKey={`${view}-${selectedSource || 'none'}-${displayedResult?.id || 'empty'}`}>
         {showHome && (
           <div className="flex-grow flex flex-col items-center justify-center -mt-2 pt-6 pb-10 transition-all duration-700 animate-fade-in px-2 md:-mt-8 md:pt-8 md:pb-14 md:px-0">
             <div className="max-w-4xl w-full text-center relative mb-8 md:mb-16">
-              <HangingLabel ariaLabel="The Philosophical Engine" className="mb-4 md:mb-8">
-                The Philosophical Engine
-              </HangingLabel>
+              <div className="relative z-30">
+                <HangingLabel ariaLabel="The Philosophical Engine" className="mb-4 md:mb-8">
+                  The Philosophical Engine
+                </HangingLabel>
+              </div>
 
-              <h1 className="font-serif text-4xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.92] sm:leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
-                Sophia's<br />
-                <span className="italic relative inline-block">
-                  Dialectic
-                  <svg className="absolute w-[110%] h-2 md:h-4 -bottom-1 md:-bottom-2 -left-[5%] text-museum-300/50" viewBox="0 0 100 10" preserveAspectRatio="none">
-                    <path d="M0 5 Q 50 12 100 5" stroke="currentColor" strokeWidth="2" fill="none" />
-                  </svg>
-                </span>
-              </h1>
+              <div className="hero-copy-blend-target relative z-10">
+                <h1 className="font-serif text-4xl sm:text-7xl md:text-9xl text-museum-900 leading-[0.92] sm:leading-[0.9] mb-4 md:mb-6 tracking-tight drop-shadow-sm">
+                  Sophia's<br />
+                  <span className="italic relative inline-block">
+                    Dialectic
+                    <svg className="absolute w-[110%] h-2 md:h-4 -bottom-1 md:-bottom-2 -left-[5%] text-museum-300/50" viewBox="0 0 100 10" preserveAspectRatio="none">
+                      <path d="M0 5 Q 50 12 100 5" stroke="currentColor" strokeWidth="2" fill="none" />
+                    </svg>
+                  </span>
+                </h1>
 
               <p className="text-sm sm:text-base md:text-xl text-museum-700 max-w-xs sm:max-w-xl mx-auto leading-relaxed font-light mt-4 md:mt-8 px-2">
                 Where your modern anxieties become a map of thought.
@@ -1100,9 +1181,10 @@ const App: React.FC = () => {
                   输入一个困惑，生成一份可阅读的哲学分析。
                 </span>
               </p>
+              </div>
             </div>
 
-            <form onSubmit={handleAnalyze} className="relative w-full max-w-2xl mx-auto group z-20">
+            <form onSubmit={handleAnalyze} className="relative w-full max-w-2xl mx-auto group z-30">
               <div className="absolute -inset-1 bg-gradient-to-r from-museum-200 via-museum-100 to-museum-200 rounded-full blur opacity-25 group-hover:opacity-50 transition duration-1000" />
               <input
                 type="text"
@@ -1125,7 +1207,7 @@ const App: React.FC = () => {
             </form>
 
             {topicHint && (
-              <div className="mt-4 w-full max-w-2xl mx-auto px-4 py-3 rounded-2xl border border-amber-200/80 bg-amber-50/85 backdrop-blur-sm text-left">
+              <div className="relative z-30 mt-4 w-full max-w-2xl mx-auto px-4 py-3 rounded-2xl border border-amber-200/80 bg-amber-50/85 backdrop-blur-sm text-left">
                 <p className="text-sm text-amber-900 leading-relaxed">{topicHint.message}</p>
                 {topicHint.suggestions && topicHint.suggestions.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -1147,7 +1229,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="mt-5 flex flex-col items-center gap-3">
+            <div className="relative z-30 mt-5 flex flex-col items-center gap-3">
               {activeRunIsRunning ? (
                 <button onClick={openActiveRun} className="text-xs font-mono uppercase tracking-widest text-museum-600 hover:text-museum-900 underline underline-offset-4">
                   回到正在生成的问题
@@ -1161,7 +1243,7 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <div className="mt-7 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-1 md:px-2">
+            <div className="relative z-30 mt-7 md:mt-16 flex flex-wrap justify-center gap-2 md:gap-3 max-w-3xl px-1 md:px-2">
               <div className="mb-1 flex w-full flex-col items-center justify-center gap-3 md:mb-2 md:flex-row">
                 <span className="text-center text-[10px] font-mono uppercase tracking-widest text-museum-400 md:text-xs">Philosophy as a Program</span>
                 <button
@@ -1190,13 +1272,13 @@ const App: React.FC = () => {
             </div>
 
             {showActiveBanner && activeRun && (
-              <div className="mt-10 md:mt-16 w-full">
+              <div className="relative z-30 mt-10 md:mt-16 w-full">
                 <ActiveRunBanner activeRun={activeRun} onOpen={openActiveRun} />
               </div>
             )}
 
             {!API_CONFIGURED && (
-              <div className="mt-8 md:mt-12 p-3 px-6 bg-red-50 text-red-800 rounded-full border border-red-100 inline-flex items-center gap-2 text-xs font-medium shadow-sm">
+              <div className="relative z-30 mt-8 md:mt-12 p-3 px-6 bg-red-50 text-red-800 rounded-full border border-red-100 inline-flex items-center gap-2 text-xs font-medium shadow-sm">
                 <Info className="w-3 h-3" />
                 <span>未配置 API key：请到设置页填入自定义 LLM，或在部署环境补上 SOPHIA_API_KEY 后重新部署。</span>
               </div>
@@ -1261,14 +1343,39 @@ const App: React.FC = () => {
                 retryingVoiceId={retryingVoiceId}
                 isGenerating={selectedSource === 'active' && activeRunIsRunning}
                 isAppendingVoice={isAppendingVoice}
+                onOpenConcept={(keywordId) => goToConcept(displayedResult.id, keywordId)}
               />
             )}
           </>
         )}
+
+        {showConcept && conceptTarget && (() => {
+          const sourceResult = findAnalysisResultById(conceptTarget.analysisId);
+          if (!sourceResult) {
+            return (
+              <div className="max-w-2xl mx-auto mt-16 bg-white/90 border border-museum-200 rounded-xl p-8 text-center shadow-sm">
+                <h2 className="font-serif text-3xl text-museum-900 mb-3">这个概念已经离线</h2>
+                <p className="text-museum-600 leading-relaxed mb-6">来源分析不在当前历史中。可能是已被删除，或链接来自另一台设备的本地存储。</p>
+                <button onClick={goHome} className="px-6 py-3 bg-museum-900 text-museum-50 rounded-full font-serif hover:bg-black transition-colors">
+                  回到首页
+                </button>
+              </div>
+            );
+          }
+          return (
+            <ConceptDetailPage
+              result={sourceResult}
+              keywordId={conceptTarget.keywordId}
+              canEnrich={!!API_CONFIGURED}
+              onEnriched={handleKeywordEnriched}
+              onBack={goConceptBack}
+            />
+          );
+        })()}
         </AppErrorBoundary>
       </main>
 
-      <footer className="py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest relative z-10 opacity-60 hover:opacity-100 transition-opacity">
+      <footer className="py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest relative z-30 opacity-60 hover:opacity-100 transition-opacity">
         <p>© 2026 Sophia's Dialectic. Powered by Sophia & The Ancients.</p>
       </footer>
 

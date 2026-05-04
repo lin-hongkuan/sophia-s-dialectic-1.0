@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
-import { ArrowRight, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConical, LayoutGrid, Layers, MessageSquare, Sparkles, Stethoscope } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConical, LayoutGrid, Layers, MessageSquare, Sparkles, Stethoscope } from 'lucide-react';
 import { getReflectionFeedback } from '../services/sophiaService';
 import { buildMarkdownFilename, buildResultMarkdown, copyMarkdown, downloadMarkdown } from '../utils/exportResult';
 import { validateUserPrompt, ValidationMode } from '../utils/inputValidation';
@@ -18,6 +18,8 @@ interface ArenaProps {
   retryingVoiceId?: string | null;
   isGenerating?: boolean;
   isAppendingVoice?: boolean;
+  /** Open the standalone concept detail page for one of the keyword cards. */
+  onOpenConcept?: (keywordId: string) => void;
 }
 
 const modeIcon: Record<string, React.ReactNode> = {
@@ -68,7 +70,7 @@ const STUDIO_VALIDATION_MODE: Record<StudioMode, ValidationMode> = {
   note: 'note',
 };
 
-const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, onRetryVoice, retryingVoiceId, isGenerating, isAppendingVoice }) => {
+const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, onRetryVoice, retryingVoiceId, isGenerating, isAppendingVoice, onOpenConcept }) => {
   const [reflection, setReflection] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isGettingFeedback, setIsGettingFeedback] = useState(false);
@@ -219,7 +221,7 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
             <div>
               <span className="text-xs font-mono uppercase tracking-widest text-museum-400">Concept Notes</span>
               <h2 className="font-serif text-2xl md:text-3xl text-museum-900 mt-2">阅读前的概念标记</h2>
-              <p className="text-museum-800 leading-relaxed mt-3">先把这些词放在视野里：后面的分歧，往往就是从它们的不同理解开始的。</p>
+              <p className="text-museum-800 leading-relaxed mt-3">先把这些词放在视野里：后面的分歧，往往就是从它们的不同理解开始的。点击任意一张概念卡，可以打开完整的概念档案。</p>
             </div>
             <span className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-museum-600">
               {keywordsOpen ? '收起' : '展开'} {keywordsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -232,13 +234,34 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
           </div>
           {keywordsOpen && (
             <div className="border-t border-museum-100 p-4 md:p-8 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
-              {data.keywords.map((keyword) => (
-                <div key={keyword.id} className="bg-museum-50/80 border border-museum-100 p-5">
-                  <h3 className="font-serif text-2xl text-museum-900 mb-3">{keyword.term}</h3>
-                  <p className="text-museum-800 leading-relaxed mb-4">{keyword.meaning}</p>
-                  <p className="text-sm text-museum-600 leading-relaxed border-t border-museum-100 pt-3">为什么它会改变问题：{keyword.importance}</p>
-                </div>
-              ))}
+              {data.keywords.map((keyword) => {
+                const hasArchive = !!onOpenConcept;
+                return (
+                  <div key={keyword.id} className="bg-museum-50/80 border border-museum-100 p-5 flex flex-col gap-3">
+                    <div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <h3 className="font-serif text-2xl text-museum-900">{keyword.term}</h3>
+                        {keyword.enriched && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-museum-500">
+                            <BookOpen className="w-3 h-3" /> 完整档案
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-museum-800 leading-relaxed mt-3">{keyword.meaning}</p>
+                      <p className="text-sm text-museum-600 leading-relaxed border-t border-museum-100 mt-3 pt-3">为什么它会改变问题：{keyword.importance}</p>
+                    </div>
+                    {hasArchive && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenConcept?.(keyword.id)}
+                        className="self-start inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-museum-700 hover:text-museum-900 transition-colors"
+                      >
+                        查看完整概念 <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
