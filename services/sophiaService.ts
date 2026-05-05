@@ -7,18 +7,22 @@ import {
   GenerationLogEntry,
   GenerationProgress,
   KeywordExplainer,
+  Message,
   OpenConclusion,
   ProgramMode,
   RouteNode,
+  RunControlHandle,
   RunSnapshot,
   TensionFocus,
   ThoughtVoice,
   ThoughtVoiceImageAvatar,
   TokenUsage,
   TokenUsageStage,
+  VoiceInsertSeed,
   VoiceKind,
   emptyConclusion,
 } from '../types';
+import { buildVoicePersona } from './voiceChat';
 import {
   HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
   HISTORICAL_PHILOSOPHER_NEGATIVE_AVATAR_PROMPT,
@@ -38,6 +42,7 @@ import {
 import { getActiveConfig } from './sophiaConfig';
 import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
 import { ModelJsonParseError, parseModelJson } from './jsonResponse';
+import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './stageCache';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
@@ -47,11 +52,44 @@ interface RunContext {
   stage: TokenUsageStage;
   voiceId?: string;
   voiceName?: string;
+  /**
+   * Run-wide cancel signal (e.g., the user clicked "取消"). Threaded into
+   * fetchWithRetry by the chat/image callers below. When this fires every
+   * in-flight network call aborts.
+   */
+  abortSignal?: AbortSignal;
+  /**
+   * Per-voice cancel signal pushed onto the stack while a voice is being
+   * generated. Skipping a single voice aborts only this signal, leaving the
+   * run-wide signal alive so the rest of the pipeline keeps going.
+   */
+  voiceAbortSignal?: AbortSignal;
 }
 
 const runStack: RunContext[] = [];
 
 const currentRunContext = (): RunContext | null => runStack[runStack.length - 1] || null;
+
+/**
+ * Compose the run-wide signal with the per-voice signal so a single call to
+ * fetchWithRetry can react to either. We can't use AbortSignal.any (not in
+ * TS lib targets here) so a tiny manual fan-in does the job.
+ */
+const effectiveSignal = (ctx: RunContext | null): AbortSignal | undefined => {
+  if (!ctx) return undefined;
+  const { abortSignal: run, voiceAbortSignal: voice } = ctx;
+  if (!run && !voice) return undefined;
+  if (run && !voice) return run;
+  if (voice && !run) return voice;
+  // Both present — fan in by aborting a fresh controller when either fires.
+  const merged = new AbortController();
+  const onAbort = (origin?: AbortSignal) => merged.abort(origin?.reason);
+  if (run!.aborted) merged.abort(run!.reason);
+  else run!.addEventListener('abort', () => onAbort(run!), { once: true });
+  if (voice!.aborted) merged.abort(voice!.reason);
+  else voice!.addEventListener('abort', () => onAbort(voice!), { once: true });
+  return merged.signal;
+};
 
 const pushRunContext = (ctx: RunContext) => {
   runStack.push(ctx);
@@ -313,7 +351,7 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
         size: cfg.avatarImageSize,
         response_format: 'b64_json',
       }),
-    }, { timeoutMs: 120000, label: 'avatar-image' });
+    }, { timeoutMs: 120000, label: 'avatar-image', signal: effectiveSignal(currentRunContext()) });
 
     if (!response.ok) {
       throw new Error(await apiErrorMessage(response));
@@ -369,17 +407,41 @@ export const generateThoughtVoiceAvatar = async (
   voicePlan: { name: string; kind: VoiceKind; school?: string; role: string; coreConcept: string; oneLine: string; stance: string },
 ): Promise<ThoughtVoiceImageAvatar> => {
   const prompt = buildThoughtVoiceAvatarPrompt(topic, outline, voicePlan);
-  const imageUrl = await callAvatarImage(prompt);
   const cfg = getActiveConfig();
-  return {
-    imageUrl,
-    prompt,
-    style: resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
-    model: cfg.avatarImageModel,
-    alt: `${voicePlan.name} 的竖版思想声音头像`,
-    generatedAt: new Date().toISOString(),
-    subjectType: voicePlan.kind,
-  };
+  // The prompt already incorporates style overrides + cfg-derived inputs, so
+  // the prompt + image model + size form a complete fingerprint for the
+  // image call. We cache the whole avatar object (URL + metadata) so a hit
+  // can skip the /images/generations round-trip entirely.
+  return withStageCache<ThoughtVoiceImageAvatar>(
+    'avatar',
+    {
+      prompt,
+      model: cfg.avatarImageModel,
+      size: cfg.avatarImageSize,
+      aspect: cfg.avatarAspectHint,
+      voiceKind: voicePlan.kind,
+    },
+    async () => {
+      const imageUrl = await callAvatarImage(prompt);
+      return {
+        imageUrl,
+        prompt,
+        style: resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
+        model: cfg.avatarImageModel,
+        alt: `${voicePlan.name} 的竖版思想声音头像`,
+        generatedAt: new Date().toISOString(),
+        subjectType: voicePlan.kind,
+      };
+    },
+    {
+      onHit: () => emitLog({
+        level: 'detail',
+        stage: 'avatar',
+        voiceName: voicePlan.name,
+        message: `${voicePlan.name} 命中阶段缓存：复用上次的思想头像。`,
+      }),
+    },
+  );
 };
 
 const parseSseResponse = (text: string): unknown => {
@@ -404,8 +466,10 @@ const parseSseResponse = (text: string): unknown => {
 // the JSON in **bold** or prepend prose; this clause is a stronger lever.
 const STRICT_JSON_REINFORCEMENT = '严格规则：仅输出一个有效的 JSON 对象。不要使用 Markdown 代码围栏（``` 或 ```json），不要加粗体（**）或斜体（*、_）修饰，不要在 JSON 前后添加任何文字、注释或致谢。整个回复必须能被 JSON.parse 直接解析。';
 
+type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
 const callChatJsonOnce = async <T>(
-  messages: Array<{ role: 'system' | 'user'; content: string }>,
+  messages: ChatMessage[],
   maxTokens: number,
   attemptLabel: string,
 ): Promise<T> => {
@@ -421,7 +485,7 @@ const callChatJsonOnce = async <T>(
       stream: false,
       response_format: { type: 'json_object' },
     }),
-  }, { timeoutMs: 90000, label: attemptLabel });
+  }, { timeoutMs: 90000, label: attemptLabel, signal: effectiveSignal(currentRunContext()) });
 
   if (!response.ok) {
     throw new Error(await apiErrorMessage(response));
@@ -442,7 +506,7 @@ const callChatJsonOnce = async <T>(
   return parseJson<T>(content);
 };
 
-const callChatJson = async <T>(messages: Array<{ role: 'system' | 'user'; content: string }>, maxTokens = 4096): Promise<T> => {
+const callChatJson = async <T>(messages: ChatMessage[], maxTokens = 4096): Promise<T> => {
   try {
     return await callChatJsonOnce<T>(messages, maxTokens, 'chat-json');
   } catch (error) {
@@ -470,7 +534,7 @@ const STREAM_IDLE_TIMEOUT_MS = 45000;
 const STREAM_FALLBACK_MIN_CHARS = 200;
 
 const callChatText = async (
-  messages: Array<{ role: 'system' | 'user'; content: string }>,
+  messages: ChatMessage[],
   maxTokens = 4096,
   onDelta?: (delta: string, fullText: string) => void,
 ): Promise<string> => {
@@ -486,7 +550,7 @@ const callChatText = async (
         max_tokens: maxTokens,
         stream: false,
       }),
-    }, { timeoutMs: 120000, label: 'chat-text' });
+    }, { timeoutMs: 120000, label: 'chat-text', signal: effectiveSignal(currentRunContext()) });
 
     if (!response.ok) {
       throw new Error(await apiErrorMessage(response));
@@ -504,6 +568,7 @@ const callChatText = async (
   }
 
   // Streaming path: connect with retry+timeout, then read body with per-chunk idle timeout.
+  const streamSignal = effectiveSignal(currentRunContext());
   const response = await fetchWithRetry(chatEndpoint(), {
     method: 'POST',
     headers: requestHeaders(),
@@ -514,7 +579,7 @@ const callChatText = async (
       max_tokens: maxTokens,
       stream: true,
     }),
-  }, { timeoutMs: 60000, label: 'chat-text-stream-connect' });
+  }, { timeoutMs: 60000, label: 'chat-text-stream-connect', signal: streamSignal });
 
   if (!response.ok || !response.body) {
     const text = await response.text().catch(() => '');
@@ -525,6 +590,17 @@ const callChatText = async (
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let fullText = '';
+
+  // The outer signal (run cancel / voice skip) was only attached to fetchWithRetry's
+  // internal controller, which has already been detached by the time we hold the
+  // reader. Re-attach a listener so cancelling now actually breaks the stream.
+  const onOuterAbort = () => {
+    reader.cancel(streamSignal?.reason ?? new DOMException('aborted by caller', 'AbortError')).catch(() => {});
+  };
+  if (streamSignal) {
+    if (streamSignal.aborted) onOuterAbort();
+    else streamSignal.addEventListener('abort', onOuterAbort, { once: true });
+  }
 
   // Idle timeout: if no chunk arrives for STREAM_IDLE_TIMEOUT_MS, abort the read.
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -576,6 +652,12 @@ const callChatText = async (
     return fullText;
   } catch (error) {
     disarmIdleTimer();
+    // Outer cancel / voice skip — propagate the abort instead of trying to
+    // fall back, otherwise we'd just hammer a fresh fetch that immediately
+    // rejects with the same AbortError.
+    if (streamSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      throw error instanceof Error ? error : new DOMException('aborted', 'AbortError');
+    }
     // If the stream broke early without producing meaningful content, fall back to a
     // non-streaming retry so the user still gets something readable.
     const reason = idleAborted
@@ -876,11 +958,24 @@ const formatContinuationContext = (context?: ContinuationContext) => {
 
 const generateOutline = async (topic: string, continuationContext?: ContinuationContext): Promise<AnalysisOutline> => {
   const continuationText = formatContinuationContext(continuationContext);
-  const raw = await callChatJson<any>([
-    { role: 'system', content: resolveOutlineSystemPrompt(getActiveConfig().promptOverrides) },
-    {
-      role: 'user',
-      content: `为这个用户问题设计哲学分析骨架：${topic}${continuationText}
+  const cfg = getActiveConfig();
+  const systemPrompt = resolveOutlineSystemPrompt(cfg.promptOverrides);
+  const fingerprint = {
+    topic,
+    continuationContext: continuationContext || null,
+    model: cfg.apiModel,
+    provider: cfg.apiProvider,
+    systemPrompt,
+  };
+
+  const raw = await withStageCache<any>(
+    'outline',
+    fingerprint,
+    () => callChatJson<any>([
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: `为这个用户问题设计哲学分析骨架：${topic}${continuationText}
 
 必须输出 JSON：
 {
@@ -923,8 +1018,10 @@ const generateOutline = async (topic: string, continuationContext?: Continuation
 }
 
 voicePlans 选择 2-5 个，必须足够贴题。不要生成 routeMap.nextQuestion；继续追问统一放到 followUps。如果 mode 是 thought_experiment 或 thought_experiment_panel，必须生成 thoughtExperiment，且 responseMap.voiceId 必须匹配 voicePlans 的 id。`,
-    },
-  ], 3500);
+      },
+    ], 3500),
+    { onHit: () => emitLog({ level: 'detail', stage: 'outline', message: '命中阶段缓存：outline 直接返回上次结果。' }) },
+  );
 
   const mode = normalizeMode(raw.mode);
   const now = new Date().toISOString();
@@ -968,11 +1065,56 @@ const generateVoiceEssay = async (
     emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像生成失败，将使用占位。` });
     return undefined;
   });
-  const argument = await callChatText([
-    { role: 'system', content: resolveVoiceSystemPrompt(getActiveConfig().promptOverrides) },
-    {
-      role: 'user',
-      content: `用户问题：${topic}
+
+  // We cache the (argument + summary) pair under the 'voice' kind. The avatar
+  // is cached separately under 'avatar' (different TTL), and runs in parallel.
+  // We use buildStageKey + manual get/put rather than withStageCache so that
+  // on a cache hit we can still call onDelta with the full text in one shot —
+  // the streaming UI relies on at least one onDelta to render the final body.
+  const cfg = getActiveConfig();
+  const voiceSystemPrompt = resolveVoiceSystemPrompt(cfg.promptOverrides);
+  const voiceMaxTokens = cfg.options.voiceMaxTokens;
+  const fingerprint = {
+    topic,
+    modeLabel: outline.modeLabel,
+    bigQuestion: outline.philosophical_title,
+    introduction: outline.introduction,
+    programStructure: outline.programStructure,
+    voicePlan,
+    model: cfg.apiModel,
+    provider: cfg.apiProvider,
+    voiceMaxTokens,
+    voiceSystemPrompt,
+  };
+  const voiceCacheKey = buildStageKey('voice', fingerprint);
+  type VoiceCacheValue = {
+    argument: string;
+    summary: { summaryForSynthesis: string; quote?: string; challenges?: string[] };
+  };
+  const cachedEssay = await getStageEntry<VoiceCacheValue>('voice', voiceCacheKey);
+
+  let argument: string;
+  let summary: { summaryForSynthesis: string; quote?: string; challenges?: string[] };
+
+  if (cachedEssay) {
+    emitLog({
+      level: 'detail',
+      stage: 'voices',
+      voiceId: voicePlan.id,
+      voiceName: voicePlan.name,
+      message: `${voicePlan.name} 命中阶段缓存：复用上次的正文与摘要。`,
+    });
+    argument = cachedEssay.argument;
+    summary = cachedEssay.summary;
+    // Replay the full body in a single chunk so the streaming UI lands on the
+    // cached text instead of staying blank.
+    onDelta?.(argument, argument);
+  } else {
+    argument = await callChatText([
+      { role: 'system', content: voiceSystemPrompt },
+      {
+        role: 'user',
+        content: `用户问题：${topic}
 分析路径：${outline.modeLabel}
 大问题：${outline.philosophical_title}
 开题：${outline.introduction}
@@ -992,21 +1134,25 @@ const generateVoiceEssay = async (
 可被批评处：${voicePlan.critique || '无'}
 
 直接输出正文，不要 JSON，不要标题。`,
-    },
-  ], getActiveConfig().options.voiceMaxTokens, onDelta);
+      },
+    ], voiceMaxTokens, onDelta);
 
-  onStep?.(`${voicePlan.name} 正在提炼摘要与可被批评处...`);
-  const summary = await callChatJson<{ summaryForSynthesis: string; quote?: string; challenges?: string[] }>([
-    { role: 'system', content: '你是哲学分析编辑。请把长文压缩成供最终综合判断使用的 JSON。只输出 JSON。' },
-    {
-      role: 'user',
-      content: `用户问题：${topic}
+    onStep?.(`${voicePlan.name} 正在提炼摘要与可被批评处...`);
+    summary = await callChatJson<{ summaryForSynthesis: string; quote?: string; challenges?: string[] }>([
+      { role: 'system', content: '你是哲学分析编辑。请把长文压缩成供最终综合判断使用的 JSON。只输出 JSON。' },
+      {
+        role: 'user',
+        content: `用户问题：${topic}
 思想声音：${voicePlan.name}
 长文：${argument}
 
 输出 JSON：{"summaryForSynthesis":"120-180字摘要，说明诊断/主张/药方和与其他立场的潜在分歧","quote":"一句适合展示的短句，可合成风格化表达","challenges":["它会挑战的其他立场或问题"]}`,
-    },
-  ], 1000).catch(() => ({ summaryForSynthesis: voicePlan.stance || voicePlan.oneLine || '', quote: '', challenges: [] }));
+      },
+    ], 1000).catch(() => ({ summaryForSynthesis: voicePlan.stance || voicePlan.oneLine || '', quote: '', challenges: [] }));
+
+    // Fire-and-forget the write so it doesn't slow down voice completion.
+    void putStageEntry('voice', voiceCacheKey, { argument, summary });
+  }
 
   onStep?.(`${voicePlan.name} 正在等待并行头像完成...`);
   const avatar = await avatarPromise;
@@ -1034,17 +1180,33 @@ const generateVoiceEssay = async (
 };
 
 const generateRouteDetails = async (topic: string, outline: AnalysisOutline): Promise<RouteNode[]> => {
-  const result = await callChatJson<{ routeMap: RouteNode[] }>([
-    { role: 'system', content: '你是中文哲学分析结构编辑。补全论证路线图，保持短而有推进力。只输出 JSON。' },
-    {
-      role: 'user',
-      content: `用户问题：${topic}
+  const cfg = getActiveConfig();
+  // Route detail expansion only depends on the outline's modeLabel, the
+  // existing routeMap shape, the topic, and the model. Mode label changes
+  // would invalidate; voicePlans don't enter this stage.
+  const fingerprint = {
+    topic,
+    modeLabel: outline.modeLabel,
+    routeMap: outline.routeMap,
+    model: cfg.apiModel,
+    provider: cfg.apiProvider,
+  };
+  const result = await withStageCache<{ routeMap: RouteNode[] }>(
+    'route',
+    fingerprint,
+    () => callChatJson<{ routeMap: RouteNode[] }>([
+      { role: 'system', content: '你是中文哲学分析结构编辑。补全论证路线图，保持短而有推进力。只输出 JSON。' },
+      {
+        role: 'user',
+        content: `用户问题：${topic}
 分析路径：${outline.modeLabel}
 已有路线：${JSON.stringify(outline.routeMap)}
 
 请补全 routeMap，每个节点 plain 120-220字，philosophical 120-220字，必须有清晰推进。不要生成 nextQuestion 字段，继续追问统一留给 followUps。输出 JSON：{"routeMap":[...]}`,
-    },
-  ], 2500).catch(() => ({ routeMap: outline.routeMap }));
+      },
+    ], 2500).catch(() => ({ routeMap: outline.routeMap })),
+    { onHit: () => emitLog({ level: 'detail', stage: 'route', message: '命中阶段缓存：路线细节直接返回上次结果。' }) },
+  );
   const routeMap = normalizeRouteMap(result.routeMap);
   return routeMap.length > 0 ? routeMap : outline.routeMap;
 };
@@ -1061,11 +1223,33 @@ const generateSynthesis = async (
     conclusion: emptyConclusion,
   };
 
-  const raw = await callChatJson<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>([
-    { role: 'system', content: resolveSynthesisSystemPrompt(getActiveConfig().promptOverrides) },
-    {
-      role: 'user',
-      content: `用户问题：${topic}
+  const cfg = getActiveConfig();
+  const systemPrompt = resolveSynthesisSystemPrompt(cfg.promptOverrides);
+  // Synthesis only sees voice summaries (not full essays) — fingerprint matches
+  // the prompt input exactly so a re-run on the same voices reuses output.
+  const voicesSummary = voices.map((v) => ({
+    id: v.id,
+    name: v.name,
+    summaryForSynthesis: v.summaryForSynthesis,
+  }));
+  const fingerprint = {
+    topic,
+    modeLabel: outline.modeLabel,
+    bigQuestion: outline.philosophical_title,
+    voicesSummary,
+    model: cfg.apiModel,
+    provider: cfg.apiProvider,
+    systemPrompt,
+  };
+
+  const raw = await withStageCache<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>(
+    'synthesis',
+    fingerprint,
+    () => callChatJson<Partial<Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>>>([
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: `用户问题：${topic}
 分析路径：${outline.modeLabel}
 大问题：${outline.philosophical_title}
 思想声音摘要：
@@ -1093,8 +1277,10 @@ ${voices.map((v) => `${v.name}: ${v.summaryForSynthesis}`).join('\n')}
 
 followUps 必须是对当前分析的延伸，不要像另一个全新选题。tensions 至少 2 条；如果声音之间没有真实分歧，要诚实指出"这几位在该问题上有共识、分歧出现在更细的环节"。
 keywords 至少 3 条；每条都必须填齐七个长字段（definition / misconception / representativeFigures / relationToQuestion / lifeExample / challengeQuestion / furtherReading），不要为了凑数复述其他字段。representativeFigures 至少 1 项；furtherReading 至少 2 项书目或思想方向。`,
-    },
-  ], 5500).catch(() => fallback);
+      },
+    ], 5500).catch(() => fallback),
+    { onHit: () => emitLog({ level: 'detail', stage: 'synthesis', message: '命中阶段缓存：综合判断直接返回上次结果。' }) },
+  );
 
   return {
     tensions: normalizeTensions(raw.tensions),
@@ -1443,8 +1629,25 @@ export const analyzeTopic = async (
   callbacks: AnalyzeCallbacks = {},
   continuationContext?: ContinuationContext,
 ): Promise<AnalysisResult> => {
+  // Hard-fail before any state setup if we know we're offline. The browser
+  // would otherwise reject the first fetch with a generic TypeError that's
+  // hard to surface as "you're offline" in the UI; this gives us a clean,
+  // localized error without spending any setup work.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const offlineErr = new Error('当前处于离线状态，暂时无法生成新分析。请等网络恢复后再试。');
+    callbacks.onError?.(offlineErr.message);
+    throw offlineErr;
+  }
   const report = (progress: GenerationProgress) => callbacks.onProgress?.(progress);
   const tokenUsage: TokenUsage[] = [];
+
+  // Run-wide cancel signal. Single source of truth — fired by handle.cancel()
+  // and observed by every chat/image call via runStack → currentRunContext.
+  const runAborter = new AbortController();
+  // Per-voice cancel signals. Skipping a voice aborts only its controller;
+  // other workers and the run-wide signal stay alive.
+  const inFlightVoices = new Map<string, AbortController>();
+
   const ctx = pushRunContext({
     stage: 'outline',
     onLog: callbacks.onLog,
@@ -1452,7 +1655,173 @@ export const analyzeTopic = async (
       tokenUsage.push(usage);
       callbacks.onTokenUsage?.(usage);
     },
+    abortSignal: runAborter.signal,
   });
+
+  /**
+   * Mutable voice queue. Workers pop from the front; inserts push onto the
+   * back. Sharing this array between workers and the insert handler is the
+   * whole reason inserts can land mid-stage without an extra plumbing layer.
+   */
+  const voiceQueue: AnalysisOutline['voicePlans'] = [];
+  /**
+   * Inserts that arrive BEFORE the voices stage opens (i.e. while we're still
+   * in outline / route). They get flushed onto voiceQueue the moment the
+   * voices stage starts, so the user can click "加入" early without losing
+   * the request.
+   */
+  const pendingInserts: AnalysisOutline['voicePlans'] = [];
+  const completedVoices: ThoughtVoice[] = [];
+  let voicesStageEntered = false;
+  /** Set true once the worker pool has fully drained AND the grace window
+   *  for late inserts has elapsed. After this point, insertVoice no-ops. */
+  let voicesStageClosed = false;
+  /** Number of workers currently inside processOneVoice — used to detect a
+   *  fully-idle pool before triggering the close-grace timer. */
+  let activeWorkerCount = 0;
+  /** Total voices the orchestrator currently expects to ship in the final
+   *  result. Starts as outline.voicePlans.length and grows by 1 per insert.
+   *  Used for the progress counter so totalVoices stays monotonic. */
+  let plannedVoiceTotal = 0;
+  /** Wakeup resolvers for idle workers. We track every parked worker (not
+   *  just the last one) so a single wake broadcasts to all of them — JS is
+   *  single-threaded, so the resulting "thundering herd" is benign: workers
+   *  that wake without finding work just loop and re-park or exit. Tracking
+   *  only the last resolver was an earlier bug that left N-1 workers stuck
+   *  forever and prevented Promise.all from ever resolving. */
+  const wakeupResolvers: Array<() => void> = [];
+  const waitForWork = (): Promise<void> => {
+    if (voiceQueue.length > 0 || voicesStageClosed || runAborter.signal.aborted) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      wakeupResolvers.push(resolve);
+    });
+  };
+  const wakeWorkers = () => {
+    if (wakeupResolvers.length === 0) return;
+    const resolvers = wakeupResolvers.splice(0);
+    for (const r of resolvers) r();
+  };
+
+  const buildInsertedPlan = (seed: VoiceInsertSeed): AnalysisOutline['voicePlans'][number] => ({
+    id: makeId('voice'),
+    name: trimmedVoiceName(seed.prompt),
+    kind: 'philosopher',
+    school: '',
+    role: '后来加入的思想声音',
+    coreConcept: '延展视角',
+    oneLine: `沿着"${seed.prompt}"加入当前分析`,
+    stance: `回应用户希望补充的视角：${seed.prompt}`,
+    diagnosis: '',
+    prescription: '',
+    thesis: '',
+    critique: '',
+  });
+
+  const emitInsertedPlaceholder = (plan: AnalysisOutline['voicePlans'][number], userPrompt: string) => {
+    const placeholder: ThoughtVoice = {
+      ...plan,
+      argument: '',
+      summaryForSynthesis: '',
+      status: 'queued',
+      addedByUserPrompt: userPrompt,
+      addedAt: new Date().toISOString(),
+    };
+    callbacks.onVoicePlanned?.(placeholder);
+  };
+
+  const handle: RunControlHandle = {
+    cancel: (reason) => {
+      if (runAborter.signal.aborted) return;
+      const err = new DOMException(reason || '用户已取消生成', 'AbortError');
+      runAborter.abort(err);
+      // Also abort every per-voice controller so streaming readers exit promptly.
+      inFlightVoices.forEach((c) => c.abort(err));
+      // Wake any worker parked on waitForWork so they observe the abort and exit.
+      voicesStageClosed = true;
+      wakeWorkers();
+      emitLog({ level: 'warn', stage: ctx.stage, message: '收到取消信号，正在中止当前生成...' });
+    },
+    skipVoice: (voiceId) => {
+      // In flight → abort the per-voice controller; processOneVoice's catch
+      // will mark it 'skipped'.
+      const ctrl = inFlightVoices.get(voiceId);
+      if (ctrl && !ctrl.signal.aborted) {
+        ctrl.abort(new DOMException('skipped by user', 'AbortError'));
+        return;
+      }
+      // Still queued → splice and emit a synthetic 'skipped' completion so
+      // the UI can update the placeholder card immediately.
+      const queueIdx = voiceQueue.findIndex((p) => p.id === voiceId);
+      if (queueIdx >= 0) {
+        const [removed] = voiceQueue.splice(queueIdx, 1);
+        const skipped: ThoughtVoice = {
+          ...removed,
+          argument: '',
+          summaryForSynthesis: '',
+          status: 'skipped',
+        };
+        callbacks.onVoiceComplete?.(skipped);
+        emitLog({ level: 'warn', stage: 'voices', voiceId, voiceName: removed.name, message: `${removed.name} 已被用户跳过（未启动）。` });
+        return;
+      }
+      // Not yet flushed (still buffered while we're in outline / route) →
+      // remove from pendingInserts. No onVoiceComplete here because no
+      // placeholder card was ever shown (insertedPlaceholder fires on insert).
+      const pendingIdx = pendingInserts.findIndex((p) => p.id === voiceId);
+      if (pendingIdx >= 0) {
+        const [removed] = pendingInserts.splice(pendingIdx, 1);
+        const skipped: ThoughtVoice = {
+          ...removed,
+          argument: '',
+          summaryForSynthesis: '',
+          status: 'skipped',
+        };
+        callbacks.onVoiceComplete?.(skipped);
+        emitLog({ level: 'warn', stage: ctx.stage, voiceId, voiceName: removed.name, message: `${removed.name} 已被用户跳过（尚未进入声音阶段）。` });
+      }
+    },
+    insertVoice: (seed: VoiceInsertSeed) => {
+      if (runAborter.signal.aborted) return '';
+      const stubPlan = buildInsertedPlan(seed);
+
+      if (!voicesStageEntered) {
+        // Voices stage hasn't opened yet — buffer the insert and surface a
+        // queued placeholder card. It'll be flushed onto voiceQueue the
+        // moment we transition to the voices stage.
+        pendingInserts.push(stubPlan);
+        emitInsertedPlaceholder(stubPlan, seed.prompt);
+        emitLog({ level: 'info', stage: ctx.stage, voiceId: stubPlan.id, voiceName: stubPlan.name, message: `已记录用户请求的新声音：${stubPlan.name}（"${seed.prompt}"），将在声音阶段开始时加入队列。` });
+        return stubPlan.id;
+      }
+
+      if (voicesStageClosed) {
+        // Workers have drained and the close-grace window has expired; we're
+        // either inside synthesis or about to start it. The append-after-result
+        // path (appendThoughtVoice) handles this case from the Arena page —
+        // here we just no-op so the insert never silently disappears mid-state.
+        emitLog({ level: 'warn', stage: ctx.stage, message: `声音阶段已关闭，无法在此时加入新声音（"${seed.prompt}"）。请在分析完成后通过"追加思想声音"加入。` });
+        return '';
+      }
+
+      voiceQueue.push(stubPlan);
+      plannedVoiceTotal += 1;
+      emitInsertedPlaceholder(stubPlan, seed.prompt);
+      emitLog({ level: 'info', stage: 'voices', voiceId: stubPlan.id, voiceName: stubPlan.name, message: `已加入用户请求的新声音：${stubPlan.name}（"${seed.prompt}"）。` });
+      // Refresh the progress counter so totalVoices reflects the bump.
+      report({
+        stage: 'voices',
+        totalVoices: plannedVoiceTotal,
+        completedVoices: completedVoices.length,
+        messages: [`已插入新声音：${stubPlan.name}`],
+      });
+      // Wake any idle worker so the insert gets picked up immediately.
+      wakeWorkers();
+      return stubPlan.id;
+    },
+  };
+  callbacks.onControl?.(handle);
 
   try {
     emitLog({ level: 'info', stage: 'outline', message: continuationContext ? '正在沿着上一份分析继续展开思想地图...' : '正在把问题整理成一张思想地图...' });
@@ -1494,27 +1863,56 @@ export const analyzeTopic = async (
     callbacks.onRouteMap?.(routeMap);
     emitLog({ level: 'info', stage: 'route', message: `已生成 ${routeMap.length} 个路线节点。` });
 
-    const voices: ThoughtVoice[] = [];
+    // Voices stage. Seed the queue with outline.voicePlans, then launch a
+    // bounded worker pool. Workers wait on a wakeup promise when the queue
+    // is empty (instead of exiting), so inserts that arrive after the
+    // initial drain still get picked up. The pool only fully exits once
+    // voicesStageClosed is set — which happens after a 150ms grace window
+    // of zero queue + zero active workers.
+    voiceQueue.push(...outline.voicePlans);
+    if (pendingInserts.length > 0) {
+      // Flush inserts that arrived while we were still in outline / route.
+      voiceQueue.push(...pendingInserts);
+      emitLog({ level: 'info', stage: 'voices', message: `已将 ${pendingInserts.length} 个早到的插入声音并入队列。` });
+      pendingInserts.length = 0;
+    }
+    plannedVoiceTotal = voiceQueue.length;
+    voicesStageEntered = true;
     ctx.stage = 'voices';
     report({
       stage: 'voices',
       modeLabel: outline.modeLabel,
-      totalVoices: outline.voicePlans.length,
+      totalVoices: plannedVoiceTotal,
       completedVoices: 0,
-      messages: [`正在生成 ${outline.voicePlans.length} 个长篇思想声音...`],
+      messages: [`正在生成 ${plannedVoiceTotal} 个长篇思想声音...`],
     });
-    emitLog({ level: 'info', stage: 'voices', message: `准备并发生成 ${outline.voicePlans.length} 个思想声音（并发数 ${getActiveConfig().options.voiceConcurrency}）。` });
+    emitLog({ level: 'info', stage: 'voices', message: `准备并发生成 ${plannedVoiceTotal} 个思想声音（并发数 ${getActiveConfig().options.voiceConcurrency}）。` });
 
-    const generatedVoices = await runWithConcurrency(outline.voicePlans, getActiveConfig().options.voiceConcurrency, async (voicePlan) => {
+    const processOneVoice = async (voicePlan: AnalysisOutline['voicePlans'][number]) => {
+      const voiceCtrl = new AbortController();
+      inFlightVoices.set(voicePlan.id, voiceCtrl);
       callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
       emitLog({ level: 'info', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 启动。` });
       report({
         stage: 'voices',
         modeLabel: outline.modeLabel,
-        totalVoices: outline.voicePlans.length,
-        completedVoices: voices.length,
+        totalVoices: plannedVoiceTotal,
+        completedVoices: completedVoices.length,
         currentVoiceName: voicePlan.name,
         messages: [`正在生成：${voicePlan.name}`],
+      });
+
+      // Push a voice-scoped context so chat/image calls see the per-voice
+      // signal. The orchestrator's run-wide signal still applies via the
+      // parent context — effectiveSignal merges both.
+      const voiceCtx = pushRunContext({
+        stage: 'voices',
+        voiceId: voicePlan.id,
+        voiceName: voicePlan.name,
+        onLog: ctx.onLog,
+        onTokenUsage: ctx.onTokenUsage,
+        abortSignal: runAborter.signal,
+        voiceAbortSignal: voiceCtrl.signal,
       });
 
       try {
@@ -1524,14 +1922,14 @@ export const analyzeTopic = async (
           report({
             stage: 'voices',
             modeLabel: outline.modeLabel,
-            totalVoices: outline.voicePlans.length,
-            completedVoices: voices.length,
+            totalVoices: plannedVoiceTotal,
+            completedVoices: completedVoices.length,
             currentVoiceName: voicePlan.name,
             messages: [message],
           });
         };
         let lastStreamLogTs = 0;
-        const voice = await withStage('voices', () => generateVoiceEssay(userTopic, outline, voicePlan, (delta, fullText) => {
+        const voice = await generateVoiceEssay(userTopic, outline, voicePlan, (delta, fullText) => {
           callbacks.onVoiceDelta?.(voicePlan.id, delta, fullText);
           const now = Date.now();
           if (now - lastStreamLogTs >= 3000) {
@@ -1541,14 +1939,14 @@ export const analyzeTopic = async (
           report({
             stage: 'voices',
             modeLabel: outline.modeLabel,
-            totalVoices: outline.voicePlans.length,
-            completedVoices: voices.length,
+            totalVoices: plannedVoiceTotal,
+            completedVoices: completedVoices.length,
             currentVoiceName: voicePlan.name,
             streamedChars: fullText.length,
             messages: [`${voicePlan.name} 正在生成长篇论述...`],
           });
-        }, reportVoiceStep), { voiceId: voicePlan.id, voiceName: voicePlan.name }).catch(async () => withStage('voices', () => generateVoiceEssay(userTopic, outline, voicePlan, undefined, reportVoiceStep), { voiceId: voicePlan.id, voiceName: voicePlan.name }));
-        voices.push(voice);
+        }, reportVoiceStep);
+        completedVoices.push(voice);
         callbacks.onVoiceComplete?.(voice);
         emitLog({
           level: 'info',
@@ -1560,14 +1958,30 @@ export const analyzeTopic = async (
         report({
           stage: 'voices',
           modeLabel: outline.modeLabel,
-          totalVoices: outline.voicePlans.length,
-          completedVoices: voices.length,
+          totalVoices: plannedVoiceTotal,
+          completedVoices: completedVoices.length,
           currentVoiceName: voicePlan.name,
           messages: [`${voicePlan.name} 已完成。`],
         });
-        return voice;
       } catch (error) {
+        // Disambiguate cancel vs skip vs failure.
         const message = error instanceof Error ? error.message : '生成失败';
+        if (runAborter.signal.aborted) {
+          // The orchestrator's outer catch will surface the cancellation. Don't
+          // emit a voice 'failed' — the voice just never finished.
+          throw error;
+        }
+        if (voiceCtrl.signal.aborted) {
+          const skipped: ThoughtVoice = {
+            ...voicePlan,
+            argument: '',
+            summaryForSynthesis: '',
+            status: 'skipped',
+          };
+          callbacks.onVoiceComplete?.(skipped);
+          emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 已被用户跳过。` });
+          return;
+        }
         const failed: ThoughtVoice = {
           ...voicePlan,
           argument: '',
@@ -1577,20 +1991,75 @@ export const analyzeTopic = async (
         };
         callbacks.onVoiceComplete?.(failed);
         emitLog({ level: 'error', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 失败：${message}` });
-        return failed;
+      } finally {
+        inFlightVoices.delete(voicePlan.id);
+        popRunContext(voiceCtx);
       }
-    });
+    };
 
-    const completedVoices = generatedVoices.filter((voice) => voice.status === 'completed');
+    /**
+     * Worker that loops on the shared queue and parks on waitForWork() when
+     * empty. The pool only exits when voicesStageClosed flips to true — which
+     * happens after a 150ms grace window of "queue empty + every worker
+     * idle". The grace window is what lets a UI-driven insert that fires at
+     * the exact boundary still get picked up rather than being lost between
+     * Promise.all() resolving and synthesis starting.
+     */
+    const VOICE_DRAIN_GRACE_MS = 150;
+    const tryClosePoolAfterGrace = async () => {
+      // Only one drain timer at a time. If another worker already triggered
+      // a close, just bail.
+      if (voicesStageClosed) return;
+      if (voiceQueue.length > 0 || activeWorkerCount > 0) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, VOICE_DRAIN_GRACE_MS));
+      // Re-check after the grace window — an insert that landed during the
+      // wait will have repopulated the queue or bumped activeWorkerCount.
+      if (voicesStageClosed) return;
+      if (voiceQueue.length > 0 || activeWorkerCount > 0) return;
+      voicesStageClosed = true;
+      wakeWorkers();
+    };
+
+    const worker = async () => {
+      while (!runAborter.signal.aborted) {
+        const next = voiceQueue.shift();
+        if (next) {
+          activeWorkerCount += 1;
+          try {
+            await processOneVoice(next);
+          } finally {
+            activeWorkerCount -= 1;
+            // Fire and forget — the grace timer self-cancels if more work
+            // arrives. We don't await it because we want the worker to loop
+            // back to the queue check immediately for any work that just
+            // got pushed (e.g. by a synchronous insertVoice during this tick).
+            void tryClosePoolAfterGrace();
+          }
+          continue;
+        }
+        if (voicesStageClosed) return;
+        await waitForWork();
+      }
+    };
+
+    const concurrency = Math.max(1, getActiveConfig().options.voiceConcurrency);
+    const workerCount = Math.max(1, Math.min(concurrency, voiceQueue.length || 1));
+    await Promise.all(Array.from({ length: workerCount }, worker));
+
+    // Run-wide cancel during voices: bail out before synthesis.
+    if (runAborter.signal.aborted) {
+      throw runAborter.signal.reason ?? new DOMException('cancelled', 'AbortError');
+    }
+
     ctx.stage = 'synthesis';
     report({
       stage: 'synthesis',
       modeLabel: outline.modeLabel,
-      totalVoices: outline.voicePlans.length,
+      totalVoices: plannedVoiceTotal,
       completedVoices: completedVoices.length,
       messages: ['正在生成分歧、关键词和综合判断...'],
     });
-    emitLog({ level: 'info', stage: 'synthesis', message: `所有思想声音已收束（${completedVoices.length}/${outline.voicePlans.length} 完成），正在生成分歧、关键词与综合判断...` });
+    emitLog({ level: 'info', stage: 'synthesis', message: `所有思想声音已收束（${completedVoices.length}/${plannedVoiceTotal} 完成），正在生成分歧、关键词与综合判断...` });
     const stopSynthesisHeartbeat = startHeartbeat('synthesis', '正在等待综合判断返回');
     let synthesis;
     try {
@@ -1602,9 +2071,16 @@ export const analyzeTopic = async (
     emitLog({ level: 'info', stage: 'synthesis', message: `综合判断已完成（${synthesis.tensions.length} 条分歧 / ${synthesis.keywords.length} 个关键词 / ${synthesis.followUps.length} 条延伸追问）。` });
 
     const totalTokens = tokenUsage.reduce((sum, entry) => sum + entry.totalTokens, 0);
+    // Merge: any voice in completedVoices that isn't in result.voices' placeholders
+    // (e.g., user-inserted) gets appended at the end.
+    const placeholderIds = new Set(result.voices.map((v) => v.id));
+    const insertedVoices = completedVoices.filter((v) => !placeholderIds.has(v.id));
     result = {
       ...result,
-      voices: result.voices.map((placeholder) => generatedVoices.find((voice) => voice.id === placeholder.id) || placeholder),
+      voices: [
+        ...result.voices.map((placeholder) => completedVoices.find((voice) => voice.id === placeholder.id) || placeholder),
+        ...insertedVoices,
+      ],
       tensions: normalizeTensions(synthesis.tensions),
       keywords: normalizeKeywords(synthesis.keywords),
       followUps: normalizeFollowUps(synthesis.followUps),
@@ -1624,6 +2100,14 @@ export const analyzeTopic = async (
 
     return result;
   } catch (error) {
+    const isAbort = error instanceof Error && error.name === 'AbortError';
+    if (isAbort) {
+      const message = '生成已取消。';
+      callbacks.onError?.(message);
+      report({ stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] });
+      emitLog({ level: 'warn', stage: 'error', message });
+      throw error;
+    }
     const message = error instanceof Error ? error.message : '发生了未知错误';
     callbacks.onError?.(message);
     report({ stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] });
@@ -1882,6 +2366,99 @@ ${tensionsSummary}
 
     const next = normalizeKeyword({ ...target, ...raw, id: target.id }, 0);
     return { ...next, enriched: isKeywordEnriched(next) };
+  } finally {
+    popRunContext(ctx);
+  }
+};
+
+/**
+ * Re-run the avatar image call for a single voice without touching its essay.
+ * Bypasses the stage cache (so the user always gets a different image) and
+ * keeps the run context active so token usage is still recorded.
+ */
+export const regenerateVoiceAvatar = async (
+  result: AnalysisResult,
+  voiceId: string,
+): Promise<ThoughtVoiceImageAvatar> => {
+  const voice = result.voices.find((v) => v.id === voiceId);
+  if (!voice) throw new Error(`找不到要重生头像的思想声音：${voiceId}`);
+
+  const ctx = pushRunContext({
+    stage: 'avatar',
+    voiceId: voice.id,
+    voiceName: voice.name,
+    onTokenUsage: (usage) => recordUsageStandalone(usage),
+  });
+  try {
+    const cfg = getActiveConfig();
+    // Append a small "regen" nonce to the prompt so the upstream image cache
+    // (and our own withStageCache, were it to be reintroduced) can't serve
+    // the previous render — users explicitly want a different image.
+    const nonce = Math.floor(Math.random() * 1e9).toString(36);
+    const basePrompt = buildThoughtVoiceAvatarPrompt(
+      result.topic,
+      { philosophical_title: result.philosophical_title, modeLabel: result.modeLabel },
+      {
+        name: voice.name,
+        kind: voice.kind,
+        school: voice.school,
+        role: voice.role,
+        coreConcept: voice.coreConcept,
+        oneLine: voice.oneLine,
+        stance: voice.stance,
+      },
+    );
+    const prompt = `${basePrompt}\nRegen variant token (do NOT render): ${nonce}`;
+    const imageUrl = await callAvatarImage(prompt);
+    return {
+      imageUrl,
+      prompt,
+      style: voice.kind === 'philosopher'
+        ? resolveHistoricalPhilosopherAvatarStyle(cfg.promptOverrides)
+        : resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
+      model: cfg.avatarImageModel,
+      alt: `${voice.name} 的竖版思想声音头像`,
+      generatedAt: new Date().toISOString(),
+      subjectType: voice.kind,
+    };
+  } finally {
+    popRunContext(ctx);
+  }
+};
+
+/**
+ * Stream a chat response from the LLM in the persona of one of the analysis's
+ * thought voices. Caller maintains the message history; we add the persona
+ * system prompt and tail-trim history to keep the upstream prompt bounded.
+ */
+export const chatWithVoice = async (
+  result: AnalysisResult,
+  voiceId: string,
+  history: Message[],
+  userMessage: string,
+  onDelta?: (delta: string, fullText: string) => void,
+): Promise<string> => {
+  const voice = result.voices.find((v) => v.id === voiceId);
+  if (!voice) throw new Error('找不到这位思想声音。');
+
+  const ctx = pushRunContext({
+    stage: 'reflection',
+    voiceId: voice.id,
+    voiceName: voice.name,
+    onTokenUsage: (usage) => recordUsageStandalone(usage),
+  });
+  try {
+    const trimmedHistory = history.slice(-20).map<ChatMessage>((m) => ({
+      role: m.role === 'system' ? 'system' : m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+    const messages: ChatMessage[] = [
+      { role: 'system', content: buildVoicePersona(voice, result) },
+      ...trimmedHistory,
+      { role: 'user', content: userMessage },
+    ];
+    const reply = await callChatText(messages, 1200, onDelta);
+    return stripReplyMarkdown(reply);
   } finally {
     popRunContext(ctx);
   }
