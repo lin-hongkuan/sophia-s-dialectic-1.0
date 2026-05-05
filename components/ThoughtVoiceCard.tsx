@@ -1,13 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ThoughtVoice } from '../types';
-import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Loader2, RefreshCw } from 'lucide-react';
+import { AnalysisResult, ThoughtVoice } from '../types';
+import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import VoiceChatModal from './VoiceChatModal';
 
 interface ThoughtVoiceCardProps {
   data: ThoughtVoice;
   index: number;
+  /** Required so the in-card "talk to this voice" modal has the surrounding analysis context. */
+  result: AnalysisResult;
   onRetry?: (voiceId: string) => void;
   isRetrying?: boolean;
   retryDisabled?: boolean;
+  /** Optional — when provided, renders a barely-visible regenerate-avatar button overlaid on the avatar. */
+  onRegenerateAvatar?: (voiceId: string) => void;
+  isRegeneratingAvatar?: boolean;
 }
 
 const kindLabel: Record<string, string> = {
@@ -188,10 +194,11 @@ const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoice
   };
 };
 
-const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetry, isRetrying = false, retryDisabled = false }) => {
+const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result, onRetry, isRetrying = false, retryDisabled = false, onRegenerateAvatar, isRegeneratingAvatar = false }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(() => typeof window === 'undefined' ? DESKTOP_PREVIEW_HEIGHT : window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
   const [contentHeight, setContentHeight] = useState(previewHeight);
+  const [chatOpen, setChatOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const avatar = getThoughtVoiceAvatar(data, index);
   const isGenerating = data.status === 'generating';
@@ -272,7 +279,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
         </div>
 
         <div className="flex lg:block items-center gap-4 md:gap-5">
-          <div className="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 lg:w-full lg:h-[15rem] xl:h-[17rem] overflow-hidden border border-museum-200 bg-museum-100 shrink-0 lg:mb-6 shadow-sm ring-2 ring-white/55 md:ring-4">
+          <div className="relative group/avatar w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 lg:w-full lg:h-[15rem] xl:h-[17rem] overflow-hidden border border-museum-200 bg-museum-100 shrink-0 lg:mb-6 shadow-sm ring-2 ring-white/55 md:ring-4">
             {avatar.type === 'generated' ? (
               <img
                 src={avatar.src}
@@ -300,6 +307,18 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
                 </span>
               </div>
             )}
+            {onRegenerateAvatar && data.status === 'completed' && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRegenerateAvatar(data.id); }}
+                disabled={isRegeneratingAvatar}
+                aria-label={`重新生成 ${data.name} 的头像`}
+                title="重新生成头像"
+                className="absolute bottom-1.5 right-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-museum-200/70 bg-white/55 text-museum-700 opacity-0 backdrop-blur-sm transition-all duration-300 hover:bg-white hover:opacity-100 focus-visible:opacity-100 group-hover/avatar:opacity-45 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isRegeneratingAvatar ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              </button>
+            )}
           </div>
           <div className="min-w-0">
             <p className="text-xs font-mono uppercase tracking-[0.28em] text-museum-400 mb-2">Voice {String(index + 1).padStart(2, '0')}</p>
@@ -315,6 +334,18 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
         <p className="mt-4 md:mt-6 border-l border-museum-300/90 pl-3 md:pl-4 text-base md:text-xl font-serif font-light text-museum-700 leading-loose tracking-wide">
           {data.oneLine || data.stance || data.coreConcept}
         </p>
+
+        <button
+          type="button"
+          onClick={() => setChatOpen(true)}
+          disabled={data.status !== 'completed'}
+          title={data.status === 'completed' ? `与 ${data.name} 对话` : '正文完成后即可对话'}
+          aria-label={`与 ${data.name} 对话`}
+          className="mt-5 md:mt-6 inline-flex items-center gap-2 border border-museum-300/90 bg-white/70 px-3.5 py-2 text-[11px] font-mono uppercase tracking-[0.22em] text-museum-700 hover:bg-museum-900 hover:text-museum-50 hover:border-museum-900 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/70 disabled:hover:text-museum-700 disabled:hover:border-museum-300/90"
+        >
+          <MessageSquare className="w-3 h-3" />
+          与 {data.name} 对话
+        </button>
       </div>
 
       {normalizedQuote && (
@@ -456,6 +487,14 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, onRetr
         {metaPanel}
         {articlePanel}
       </div>
+      {chatOpen && (
+        <VoiceChatModal
+          open={chatOpen}
+          voice={data}
+          result={result}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </article>
   );
 };

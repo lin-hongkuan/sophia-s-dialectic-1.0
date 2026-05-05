@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
-import { ArrowRight, BookOpen, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConical, LayoutGrid, Layers, MessageSquare, Sparkles, Stethoscope } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronDown, ChevronUp, Compass, Copy, Download, FlaskConical, LayoutGrid, Layers, MessageSquare, RefreshCw, Sparkles, Stethoscope } from 'lucide-react';
 import { getReflectionFeedback } from '../services/sophiaService';
 import { buildMarkdownFilename, buildResultMarkdown, copyMarkdown, downloadMarkdown } from '../utils/exportResult';
 import { validateUserPrompt, ValidationMode } from '../utils/inputValidation';
@@ -20,6 +20,12 @@ interface ArenaProps {
   isAppendingVoice?: boolean;
   /** Open the standalone concept detail page for one of the keyword cards. */
   onOpenConcept?: (keywordId: string) => void;
+  /** Optional — when provided, renders a "重新生成这份分析" button next to the bottom reset CTA. */
+  onRegenerateAll?: () => void;
+  isRegenerateAllDisabled?: boolean;
+  /** Optional — passed through to each ThoughtVoiceCard for the barely-visible regen-avatar overlay. */
+  onRegenerateAvatar?: (voiceId: string) => void;
+  regeneratingAvatarVoiceId?: string | null;
 }
 
 const modeIcon: Record<string, React.ReactNode> = {
@@ -70,7 +76,7 @@ const STUDIO_VALIDATION_MODE: Record<StudioMode, ValidationMode> = {
   note: 'note',
 };
 
-const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, onRetryVoice, retryingVoiceId, isGenerating, isAppendingVoice, onOpenConcept }) => {
+const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThoughtVoice, onRetryVoice, retryingVoiceId, isGenerating, isAppendingVoice, onOpenConcept, onRegenerateAll, isRegenerateAllDisabled, onRegenerateAvatar, regeneratingAvatarVoiceId }) => {
   const [reflection, setReflection] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isGettingFeedback, setIsGettingFeedback] = useState(false);
@@ -443,9 +449,12 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
               key={voice.id}
               data={voice}
               index={idx}
+              result={data}
               onRetry={onRetryVoice}
               isRetrying={retryingVoiceId === voice.id}
               retryDisabled={!!isGenerating || !!isAppendingVoice || (!!retryingVoiceId && retryingVoiceId !== voice.id)}
+              onRegenerateAvatar={onRegenerateAvatar}
+              isRegeneratingAvatar={regeneratingAvatarVoiceId === voice.id}
             />
           ))}
         </div>
@@ -576,7 +585,19 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
         </div>
       </section>
 
-      <div className="text-center mt-20">
+      <div className="text-center mt-20 flex flex-col sm:flex-row items-center justify-center gap-3">
+        {onRegenerateAll && (
+          <button
+            type="button"
+            onClick={onRegenerateAll}
+            disabled={isRegenerateAllDisabled}
+            title="使用同样的问题重新生成整份分析"
+            className="group inline-flex items-center gap-3 border border-museum-300 bg-white/70 px-6 py-4 shadow-sm hover:bg-museum-900 hover:text-museum-50 transition-all backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/70 disabled:hover:text-museum-800"
+          >
+            <RefreshCw className="w-4 h-4 text-museum-400 group-hover:text-museum-50 group-hover:rotate-180 transition-all duration-500" />
+            <span className="font-serif text-museum-800 group-hover:text-museum-50">重新生成这份分析</span>
+          </button>
+        )}
         <button
           onClick={onReset}
           className="group inline-flex items-center gap-3 border border-museum-300 bg-white/70 px-6 py-4 shadow-sm hover:bg-museum-900 hover:text-museum-50 transition-all backdrop-blur-sm"
