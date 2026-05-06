@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, BrainCircuit, Search, BookOpen, Scale, CheckCircle2, Circle } from 'lucide-react';
+import { Loader2, BrainCircuit, Search, BookOpen, Scale, CheckCircle2, Circle, ChevronDown, Hammer } from 'lucide-react';
 import { GenerationLogEntry, GenerationProgress } from '../types';
 import { STAGE_LABEL, STAGE_ORDER } from '../constants';
 import GenerationLogPanel from './GenerationLogPanel';
+import RubbingGame from './RubbingGame';
 
 interface ReasoningDisplayProps {
   isAnalyzing: boolean;
@@ -48,6 +49,7 @@ const estimatePercent = (stage: string, total: number, completed: number, stream
 const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress, log }) => {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [gameOpen, setGameOpen] = useState(false);
 
   useEffect(() => {
     if (isAnalyzing && !startedAt) setStartedAt(Date.now());
@@ -175,6 +177,35 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
         ) : null}
 
         <GenerationLogPanel entries={log ?? []} isAnalyzing={isAnalyzing} />
+
+        {!isDone && (
+          <div className="mt-5 border-t border-museum-100 pt-4">
+            <button
+              type="button"
+              onClick={() => setGameOpen((v) => !v)}
+              className="w-full flex items-center justify-between text-left group"
+              aria-expanded={gameOpen}
+            >
+              <span className="flex items-center gap-2">
+                <Hammer className="w-4 h-4 text-museum-500 group-hover:text-museum-900 transition-colors" />
+                <span className="font-serif text-sm text-museum-900">等待时拓一件藏品</span>
+                <span className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">
+                  Rubbing Bench
+                </span>
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 text-museum-500 transition-transform duration-300 ${
+                  gameOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+            {gameOpen && (
+              <div className="mt-5 flex justify-center bg-museum-50/60 border border-museum-100 px-4 py-6 animate-fade-in">
+                <RubbingGame variant="panel" />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
