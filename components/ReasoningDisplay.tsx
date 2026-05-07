@@ -10,6 +10,7 @@ interface ReasoningDisplayProps {
   isFinished: boolean;
   progress?: GenerationProgress | null;
   log?: GenerationLogEntry[];
+  startedAt?: string;
 }
 
 const stageSteps: Array<{ key: GenerationProgress['stage']; title: string; description: string; icon: typeof BrainCircuit }> = [
@@ -46,15 +47,20 @@ const estimatePercent = (stage: string, total: number, completed: number, stream
   return Math.min(82, Math.round(42 + completedVoicePercent + currentVoiceBoost));
 };
 
-const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress, log }) => {
-  const [startedAt, setStartedAt] = useState<number | null>(null);
+const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress, log, startedAt: startedAtIso }) => {
+  const [startedAt, setStartedAt] = useState<number | null>(() => startedAtIso ? Date.parse(startedAtIso) : null);
   const [now, setNow] = useState(Date.now());
   const [gameOpen, setGameOpen] = useState(false);
 
   useEffect(() => {
+    if (startedAtIso) {
+      const parsed = Date.parse(startedAtIso);
+      setStartedAt(Number.isFinite(parsed) ? parsed : Date.now());
+      return;
+    }
     if (isAnalyzing && !startedAt) setStartedAt(Date.now());
     if (!isAnalyzing && !progress) setStartedAt(null);
-  }, [isAnalyzing, progress, startedAt]);
+  }, [isAnalyzing, progress, startedAt, startedAtIso]);
 
   useEffect(() => {
     if (!isAnalyzing) return;
@@ -116,13 +122,13 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           </div>
         </div>
 
-        <div className="mb-5">
+        <div className="mb-5" aria-live={isAnalyzing ? 'polite' : 'off'}>
           <div className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-museum-400 mb-2 sm:flex-row sm:justify-between sm:gap-4">
             <span>{rotatingHint}</span>
             <span>{isDone ? '100%' : `约 ${percent}%`}</span>
           </div>
           <div className="h-2 bg-museum-100 rounded-full overflow-hidden">
-            <div className="h-full bg-museum-900 transition-all duration-700 ease-out" style={{ width: `${percent}%` }} />
+            <div className="h-full bg-museum-900 transition-all duration-700 ease-out motion-reduce:transition-none" style={{ width: `${percent}%` }} />
           </div>
         </div>
 
@@ -170,7 +176,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
         </div>
 
         {progress?.stage === 'error' && progress.messages?.length ? (
-          <div className="mt-5 border-t border-red-100 pt-4">
+          <div className="mt-5 border-t border-red-100 pt-4" role="alert">
             <p className="text-[10px] font-mono uppercase tracking-widest text-red-700">错误信息</p>
             <p className="mt-1 text-sm text-red-700 leading-relaxed">{progress.messages[progress.messages.length - 1]}</p>
           </div>
@@ -185,12 +191,13 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
               onClick={() => setGameOpen((v) => !v)}
               className="w-full flex items-center justify-between text-left group"
               aria-expanded={gameOpen}
+              aria-controls="reasoning-rubbing-game"
             >
               <span className="flex items-center gap-2">
                 <Hammer className="w-4 h-4 text-museum-500 group-hover:text-museum-900 transition-colors" />
-                <span className="font-serif text-sm text-museum-900">等待时拓一件藏品</span>
+                <span className="font-serif text-sm text-museum-900">等待时修复一件藏品</span>
                 <span className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">
-                  Rubbing Bench
+                  Archive Puzzle
                 </span>
               </span>
               <ChevronDown
@@ -200,7 +207,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
               />
             </button>
             {gameOpen && (
-              <div className="mt-5 flex justify-center bg-museum-50/60 border border-museum-100 px-4 py-6 animate-fade-in">
+              <div id="reasoning-rubbing-game" className="mt-5 flex justify-center bg-museum-50/60 border border-museum-100 px-4 py-6 animate-fade-in motion-reduce:animate-none">
                 <RubbingGame variant="panel" />
               </div>
             )}

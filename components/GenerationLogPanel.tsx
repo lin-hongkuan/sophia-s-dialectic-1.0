@@ -9,9 +9,9 @@ interface GenerationLogPanelProps {
 }
 
 const SESSION_STORAGE_KEY = 'sophia.log.expanded';
-const MOBILE_HEIGHT_PX = 240;
-const DESKTOP_HEIGHT_PX = 360;
 const STICKY_THRESHOLD_PX = 32;
+const LOG_PANEL_ID = 'generation-log-panel';
+const LOG_SCROLL_ID = 'generation-log-scroll';
 
 const formatTime = (iso: string): string => {
   const date = new Date(iso);
@@ -70,7 +70,6 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
   const [expanded, setExpanded] = useState<boolean>(loadExpanded);
   const [stickToBottom, setStickToBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const heightPx = typeof window !== 'undefined' && window.innerWidth < 768 ? MOBILE_HEIGHT_PX : DESKTOP_HEIGHT_PX;
 
   const totalCount = entries.length;
   const lastTokenLine = useMemo(() => {
@@ -113,6 +112,8 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
         onClick={() => setExpanded((current) => !current)}
         className="flex w-full items-center justify-between text-left"
         aria-expanded={expanded}
+        aria-controls={LOG_PANEL_ID}
+        aria-label={`${expanded ? '收起' : '展开'}生成日志`}
       >
         <span className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-museum-500">
           <Activity className="h-3 w-3" />
@@ -127,12 +128,14 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
       </button>
 
       {expanded && (
-        <div className="relative mt-3">
+        <div id={LOG_PANEL_ID} className="relative mt-3">
           <div
+            id={LOG_SCROLL_ID}
             ref={scrollRef}
             onScroll={handleScroll}
-            style={{ maxHeight: `${heightPx}px` }}
-            className="overflow-y-auto rounded border border-museum-100 bg-museum-50/40 p-3 font-mono text-[11px] leading-snug"
+            className="max-h-[240px] overflow-y-auto rounded border border-museum-100 bg-museum-50/40 p-3 font-mono text-[11px] leading-snug md:max-h-[360px]"
+            aria-live={isAnalyzing ? 'polite' : 'off'}
+            aria-relevant="additions text"
           >
             {entries.length === 0 ? (
               <p className="text-museum-400">尚未产生日志条目。生成开始后这里会持续滚动。</p>
@@ -166,11 +169,15 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
               type="button"
               onClick={handleScrollToBottom}
               className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full border border-museum-300/80 bg-white/85 px-3 py-1 text-[10px] font-mono uppercase tracking-widest text-museum-700 shadow-sm hover:bg-white"
+              aria-label="回到最新生成日志"
             >
               回到最新 <ArrowDown className="h-3 w-3" />
             </button>
           )}
 
+            <p className="mt-2 text-[10px] text-museum-400 font-mono tracking-widest">
+              仅保留最近 {totalCount} 条生成日志。
+            </p>
           {lastTokenLine && (
             <p className="mt-2 text-[10px] text-museum-400 font-mono tracking-widest">
               最近一次 token 用量：prompt {lastTokenLine.tokens?.prompt} / completion {lastTokenLine.tokens?.completion} / total {lastTokenLine.tokens?.total}

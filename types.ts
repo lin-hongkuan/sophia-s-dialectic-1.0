@@ -11,7 +11,7 @@ export type ProgramMode =
   | 'custom';
 
 export type VoiceKind = 'philosopher' | 'school' | 'concept' | 'position' | 'contemporary';
-export type VoiceStatus = 'queued' | 'generating' | 'completed' | 'failed' | 'cancelled';
+export type VoiceStatus = 'queued' | 'generating' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 
 export interface QuestionFrame {
   original: string;
@@ -246,7 +246,7 @@ export interface GenerationLogEntry {
   id: string;
   ts: string;
   level: 'info' | 'detail' | 'warn' | 'error';
-  stage: GenerationProgress['stage'] | 'meta' | 'reframe';
+  stage: TokenUsageStage | 'meta';
   voiceId?: string;
   voiceName?: string;
   message: string;
@@ -258,6 +258,16 @@ export interface AnalyzeCallbacks {
   onProgress?: (progress: GenerationProgress) => void;
   onOutline?: (outline: AnalysisOutline) => void;
   onRouteMap?: (routeMap: RouteNode[]) => void;
+  /**
+   * Fired when a brand-new voice plan enters the queue *outside* the original
+   * outline — i.e. a user-driven mid-run insertVoice. The orchestrator emits
+   * this BEFORE onVoiceStart so the UI can render a queued placeholder card
+   * for inserts (the regular outline-time placeholders are already created
+   * via onOutline → createPartialResult).
+   *
+   * Voices already represented in the outline never trigger this callback.
+   */
+  onVoicePlanned?: (voice: ThoughtVoice) => void;
   onVoiceStart?: (voiceId: string, voiceName: string) => void;
   onVoiceDelta?: (voiceId: string, delta: string, fullText: string) => void;
   onVoiceStep?: (voiceId: string, voiceName: string, message: string) => void;
@@ -268,6 +278,48 @@ export interface AnalyzeCallbacks {
   onLog?: (entry: GenerationLogEntry) => void;
   /** Per-network-call token usage, accumulated by the orchestrator. */
   onTokenUsage?: (usage: TokenUsage) => void;
+  /**
+   * Fired once at run start with a handle the UI can use to cancel the run,
+   * skip a stuck voice, or insert an extra voice mid-flight. The orchestrator
+   * never references the handle internally — it's purely a control surface
+   * for the UI layer (App.tsx → ReasoningDisplay).
+   */
+  onControl?: (handle: RunControlHandle) => void;
+}
+
+/**
+ * Mid-run control surface returned via {@link AnalyzeCallbacks.onControl}.
+ *
+ * All methods are best-effort and idempotent: calling cancel twice, or
+ * skipping a voice that already finished, is a no-op. The pipeline stays
+ * responsible for surfacing status changes through the existing callbacks
+ * (onVoiceComplete with status: 'skipped', onError with cancelled message,
+ * etc.) so the UI doesn't need a parallel feedback channel.
+ */
+export interface RunControlHandle {
+  /** Abort every in-flight stage. The orchestrator throws and the run ends. */
+  cancel: (reason?: string) => void;
+  /**
+   * Abort just this one voice's network calls and mark it status: 'skipped'.
+   * Safe to call before the voice has started — it will be skipped when the
+   * worker pulls it off the queue. No-op if the voice already completed or
+   * the voice id is unknown.
+   */
+  skipVoice: (voiceId: string) => void;
+  /**
+   * Push a new voicePlan onto the running pipeline. Returns the voice id that
+   * will be used for tracking (so the UI can pre-emptively render a "queued"
+   * card). The plan is generated and inserted into the worker queue; if
+   * voices stage already finished, this becomes a deferred append run after
+   * synthesis so the new voice still ends up in the result.
+   */
+  insertVoice: (seed: VoiceInsertSeed) => string;
+}
+
+/** User-supplied hint for what voice to add mid-run via {@link RunControlHandle.insertVoice}. */
+export interface VoiceInsertSeed {
+  /** Free-form user prompt: "加入加缪的视角" or "我想看罗尔斯的回应". */
+  prompt: string;
 }
 
 export interface AppendVoiceCallbacks {

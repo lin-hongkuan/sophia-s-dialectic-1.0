@@ -34,6 +34,7 @@ import {
   getTotals,
 } from '../services/tokenAccounting';
 import { STAGE_LABEL } from '../constants';
+import { clearStageCache, countStageEntries } from '../services/stageCache';
 import { PageHero } from './PageHero';
 
 interface SettingsPageProps {
@@ -222,14 +223,47 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [copiedPromptKey, setCopiedPromptKey] = useState<keyof PromptOverrides | null>(null);
   const [activePromptKey, setActivePromptKey] = useState<keyof PromptOverrides>(PROMPT_DEFS[0].key);
+  // Stage cache (analyze pipeline outputs cached in IndexedDB).
+  // `null` while we haven't read the count yet — distinguishes "loading" from
+  // "loaded with 0 entries" so the UI doesn't flicker "0" on first paint.
+  const [stageCacheCount, setStageCacheCount] = useState<number | null>(null);
+  const [stageCacheBusy, setStageCacheBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const testControllerRef = useRef<AbortController | null>(null);
+  const testSeqRef = useRef(0);
 
   useEffect(() => {
     const unsubscribe = subscribe((next) => setSettingsState(next));
     return () => {
       unsubscribe();
+      testControllerRef.current?.abort();
     };
   }, []);
+
+  // Refresh stage-cache count when the data tab is opened. We don't poll
+  // because the only ways the count changes are (a) a new run wrote entries,
+  // (b) the user clicked the clear button — both of which we either react to
+  // explicitly or are happy to defer until next visit.
+  useEffect(() => {
+    if (active !== 'data') return;
+    let cancelled = false;
+    countStageEntries().then((count) => {
+      if (!cancelled) setStageCacheCount(count);
+    }).catch(() => {
+      if (!cancelled) setStageCacheCount(0);
+    });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  const handleClearStageCache = async () => {
+    setStageCacheBusy(true);
+    try {
+      await clearStageCache();
+      setStageCacheCount(0);
+    } finally {
+      setStageCacheBusy(false);
+    }
+  };
 
   const refreshTokens = () => setTokens(getTotals());
 
@@ -245,6 +279,7 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
   ], [settings.customProvider.name, settings.customProvider.textModel]);
 
   const handleSelectProvider = (id: ProviderId) => {
+    testControllerRef.current?.abort();
     updateSettings({ activeProviderId: id });
     setTestState({ status: 'idle' });
   };
@@ -352,6 +387,15 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
   };
 
   const handleTestConnection = async () => {
+    testControllerRef.current?.abort();
+    const controller = new AbortController();
+    testControllerRef.current = controller;
+    const seq = testSeqRef.current + 1;
+    testSeqRef.current = seq;
+    const setLatestTestState = (next: TestConnectionState) => {
+      if (testSeqRef.current === seq && !controller.signal.aborted) setTestState(next);
+    };
+
     setTestState({ status: 'testing' });
     const cfg = getActiveConfig();
     const startedAt = Date.now();
@@ -367,11 +411,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
           max_tokens: 1,
           messages: [{ role: 'user', content: 'ping' }],
         }),
+        signal: controller.signal,
       });
 
       const elapsed = Date.now() - startedAt;
       if (response.ok) {
-        setTestState({ status: 'ok', latencyMs: elapsed });
+        setLatestTestState({ status: 'ok', latencyMs: elapsed });
         return;
       }
       const status = response.status;
@@ -389,10 +434,13 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       } catch {
         // ignore
       }
-      setTestState({ status: 'failed', message: upstream ? `${summary}（${upstream}）` : summary });
+      setLatestTestState({ status: 'failed', message: upstream ? `${summary}（${upstream}）` : summary });
     } catch (error) {
+      if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : '未知错误';
-      setTestState({ status: 'failed', message: `网络错误：${message}` });
+      setLatestTestState({ status: 'failed', message: `网络错误：${message}` });
+    } finally {
+      if (testControllerRef.current === controller) testControllerRef.current = null;
     }
   };
 
@@ -450,6 +498,35 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
     { id: 'data', label: '数据管理', icon: <Database className="h-3.5 w-3.5" /> },
   ];
 
+  const activateSectionByIndex = (index: number) => {
+    const next = sections[index];
+    if (!next) return;
+    setActive(next.id);
+    window.requestAnimationFrame(() => document.getElementById(`settings-tab-${next.id}`)?.focus());
+  };
+
+  const handleSectionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      activateSectionByIndex((index + 1) % sections.length);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      activateSectionByIndex((index - 1 + sections.length) % sections.length);
+      return;
+    }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      activateSectionByIndex(0);
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      activateSectionByIndex(sections.length - 1);
+    }
+  };
+
   const isCustomActive = settings.activeProviderId === 'custom';
   const stageEntries = Object.entries(tokens.byStage)
     .sort((a, b) => b[1].totalTokens - a[1].totalTokens);
@@ -467,12 +544,22 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
         description="在你的浏览器里调谐 Sophia 的模型、提示词、头像与运行参数。改动会立即对下一次生成生效，不需要刷新或重新部署。"
       />
 
-      <nav className="sticky top-0 z-10 -mx-4 mt-6 flex gap-2 overflow-x-auto bg-museum-50/85 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-full sm:border sm:border-museum-200/80 sm:px-2">
-        {sections.map((section) => (
+      <nav
+        className="sticky top-0 z-10 -mx-4 mt-6 flex gap-2 overflow-x-auto bg-museum-50/85 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-full sm:border sm:border-museum-200/80 sm:px-2"
+        role="tablist"
+        aria-label="设置分区"
+      >
+        {sections.map((section, index) => (
           <button
+            id={`settings-tab-${section.id}`}
             key={section.id}
             type="button"
+            role="tab"
+            aria-selected={active === section.id}
+            aria-controls={`settings-panel-${section.id}`}
+            tabIndex={active === section.id ? 0 : -1}
             onClick={() => setActive(section.id)}
+            onKeyDown={(event) => handleSectionKeyDown(event, index)}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-mono uppercase tracking-widest transition ${
               active === section.id
                 ? 'bg-museum-900 text-museum-50'
@@ -486,7 +573,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       </nav>
 
       {active === 'provider' && (
-        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
+        <section
+          id="settings-panel-provider"
+          role="tabpanel"
+          aria-labelledby="settings-tab-provider"
+          className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6"
+        >
           <SectionHeader
             icon={<Cpu className="h-4 w-4" />}
             title="生成模型"
@@ -580,18 +672,25 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
               <Plug className="h-4 w-4" />
               {testState.status === 'testing' ? '正在测试...' : '测试连接'}
             </button>
-            {testState.status === 'ok' && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] text-emerald-800">
-                <Check className="h-3 w-3" />
-                成功 · {testState.latencyMs}ms
-              </span>
-            )}
-            {testState.status === 'failed' && (
-              <span className="inline-flex items-start gap-1.5 rounded-full bg-red-50 px-3 py-1 text-[11px] text-red-800">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                {testState.message}
-              </span>
-            )}
+            <span aria-live="polite" aria-atomic="true">
+              {testState.status === 'testing' && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-museum-50 px-3 py-1 text-[11px] text-museum-700">
+                  正在测试当前连接...
+                </span>
+              )}
+              {testState.status === 'ok' && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] text-emerald-800">
+                  <Check className="h-3 w-3" />
+                  成功 · {testState.latencyMs}ms
+                </span>
+              )}
+              {testState.status === 'failed' && (
+                <span className="inline-flex items-start gap-1.5 rounded-full bg-red-50 px-3 py-1 text-[11px] text-red-800">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  {testState.message}
+                </span>
+              )}
+            </span>
           </div>
         </section>
       )}
@@ -606,7 +705,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
           return v && v.trim() ? sum + 1 : sum;
         }, 0);
         return (
-          <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-4 sm:p-5 flex flex-col">
+          <section
+            id="settings-panel-prompts"
+            role="tabpanel"
+            aria-labelledby="settings-tab-prompts"
+            className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-4 sm:p-5 flex flex-col"
+          >
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between pb-4 border-b border-museum-200/60">
               <SectionHeader
                 icon={<FileText className="h-4 w-4" />}
@@ -635,17 +739,20 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
 
             <div className="mt-4 flex flex-col md:flex-row gap-4">
               {/* Sidebar List */}
-              <div className="w-full md:w-1/4 lg:w-1/3 flex flex-col gap-1.5">
+              <div className="w-full md:w-1/4 lg:w-1/3 flex flex-col gap-1.5" role="tablist" aria-label="系统提示词类型">
                 {PROMPT_DEFS.map((def) => {
                   const isActive = def.key === activePromptKey;
                   const v = settings.promptOverrides[def.key] ?? '';
                   const hasOverride = !!v.trim();
                   return (
                     <button
+                      id={`prompt-tab-${def.key}`}
                       key={def.key}
                       type="button"
                       role="tab"
                       aria-selected={isActive}
+                      aria-controls="prompt-editor-panel"
+                      tabIndex={isActive ? 0 : -1}
                       onClick={() => setActivePromptKey(def.key)}
                       className={`relative flex flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition ${
                         isActive
@@ -673,7 +780,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
               </div>
 
               {/* Editor Pane */}
-              <div className="flex-1 flex flex-col min-w-0">
+              <div
+                id="prompt-editor-panel"
+                role="tabpanel"
+                aria-labelledby={`prompt-tab-${activeDef.key}`}
+                className="flex-1 flex flex-col min-w-0"
+              >
                 <div className="flex items-center justify-between mb-2 px-1">
                   <h3 className="font-serif text-base text-museum-900">{activeDef.label}</h3>
                   <div className="flex items-center gap-1.5">
@@ -743,7 +855,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       })()}
 
       {active === 'avatars' && (
-        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
+        <section
+          id="settings-panel-avatars"
+          role="tabpanel"
+          aria-labelledby="settings-tab-avatars"
+          className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6"
+        >
           <SectionHeader
             icon={<ImageIcon className="h-4 w-4" />}
             title="头像风格"
@@ -849,7 +966,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       )}
 
       {active === 'options' && (
-        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
+        <section
+          id="settings-panel-options"
+          role="tabpanel"
+          aria-labelledby="settings-tab-options"
+          className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6"
+        >
           <SectionHeader
             icon={<Sliders className="h-4 w-4" />}
             title="运行参数"
@@ -925,7 +1047,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       )}
 
       {active === 'tokens' && (
-        <section className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6">
+        <section
+          id="settings-panel-tokens"
+          role="tabpanel"
+          aria-labelledby="settings-tab-tokens"
+          className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6"
+        >
           <SectionHeader
             icon={<BarChart3 className="h-4 w-4" />}
             title="Token 预算"
@@ -1021,7 +1148,12 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
       )}
 
       {active === 'data' && (
-        <section className="mt-8 space-y-6">
+        <section
+          id="settings-panel-data"
+          role="tabpanel"
+          aria-labelledby="settings-tab-data"
+          className="mt-8 space-y-6"
+        >
           <div className="rounded-xl border border-museum-200 bg-white/60 p-6">
             <SectionHeader
               icon={<Database className="h-4 w-4" />}
@@ -1072,6 +1204,31 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
                 导入失败：{importError}
               </p>
             )}
+          </div>
+
+          <div className="rounded-xl border border-museum-200 bg-white/60 p-6">
+            <SectionHeader
+              icon={<Database className="h-4 w-4" />}
+              title="阶段缓存"
+              description="分析流水线的中间产物（开题、路线、思想声音正文、思想头像、综合判断）会按输入指纹缓存在浏览器本地。重跑同样的题目或重连同一份历史时直接复用，省一次 LLM 与生图调用。修改提示词或切换模型后，旧条目会自动失效。"
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="rounded-full border border-museum-200 bg-museum-50 px-3 py-1 text-[11px] font-mono uppercase tracking-widest text-museum-600">
+                {stageCacheCount === null ? '正在统计...' : `已缓存 ${stageCacheCount} 条`}
+              </span>
+              <button
+                type="button"
+                onClick={handleClearStageCache}
+                disabled={stageCacheBusy || stageCacheCount === 0}
+                className="inline-flex items-center gap-1.5 rounded border border-red-200 bg-red-50/70 px-3 py-1.5 text-[11px] text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Trash2 className="h-3 w-3" />
+                {stageCacheBusy ? '正在清空...' : '清空阶段缓存'}
+              </button>
+              <p className="text-[11px] leading-snug text-museum-500">
+                这只清掉 LLM 阶段产物缓存，不影响"生成历史"里的已保存分析。
+              </p>
+            </div>
           </div>
 
           <div className="rounded-xl border border-red-200 bg-red-50/70 p-6">

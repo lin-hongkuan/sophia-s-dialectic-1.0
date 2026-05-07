@@ -161,6 +161,20 @@ const getEraLabel = (voice: ThoughtVoice) => {
   return ERA_RULES.find(({ pattern }) => pattern.test(source))?.label || FALLBACK_ERA_LABEL[voice.kind];
 };
 
+const getSymbolicAvatar = (voice: ThoughtVoice, index: number): Extract<ThoughtVoiceAvatar, { type: 'symbolic' }> => {
+  const palette = AVATAR_PALETTES[hashText(`${voice.name}-${voice.kind}-${index}`) % AVATAR_PALETTES.length];
+  const eraLabel = getEraLabel(voice);
+  return {
+    type: 'symbolic',
+    initials: getInitials(voice.name),
+    symbol: VOICE_KIND_SYMBOL[voice.kind] || palette.symbol,
+    eraLabel,
+    background: palette.background,
+    foreground: palette.foreground,
+    title: `符号头像：${voice.name}。使用姓名缩写、稳定色板与${eraLabel}标签生成，不代表真人肖像。`,
+  };
+};
+
 const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoiceAvatar => {
   if (voice.avatar?.imageUrl) {
     return {
@@ -181,17 +195,7 @@ const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoice
     };
   }
 
-  const palette = AVATAR_PALETTES[hashText(`${voice.name}-${voice.kind}-${index}`) % AVATAR_PALETTES.length];
-  const eraLabel = getEraLabel(voice);
-  return {
-    type: 'symbolic',
-    initials: getInitials(voice.name),
-    symbol: VOICE_KIND_SYMBOL[voice.kind] || palette.symbol,
-    eraLabel,
-    background: palette.background,
-    foreground: palette.foreground,
-    title: `符号头像：${voice.name}。使用姓名缩写、稳定色板与${eraLabel}标签生成，不代表真人肖像。`,
-  };
+  return getSymbolicAvatar(voice, index);
 };
 
 const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result, onRetry, isRetrying = false, retryDisabled = false, onRegenerateAvatar, isRegeneratingAvatar = false }) => {
@@ -199,8 +203,9 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
   const [previewHeight, setPreviewHeight] = useState(() => typeof window === 'undefined' ? DESKTOP_PREVIEW_HEIGHT : window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
   const [contentHeight, setContentHeight] = useState(previewHeight);
   const [chatOpen, setChatOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
-  const avatar = getThoughtVoiceAvatar(data, index);
+  const avatar = avatarFailed ? getSymbolicAvatar(data, index) : getThoughtVoiceAvatar(data, index);
   const isGenerating = data.status === 'generating';
   const isQueued = data.status === 'queued';
   const isFailed = data.status === 'failed';
@@ -279,18 +284,31 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
         </div>
 
         <div className="flex lg:block items-center gap-4 md:gap-5">
-          <div className="relative group/avatar w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 lg:w-full lg:h-[15rem] xl:h-[17rem] overflow-hidden border border-museum-200 bg-museum-100 shrink-0 lg:mb-6 shadow-sm ring-2 ring-white/55 md:ring-4">
+          <div className="relative group/avatar w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 lg:w-full lg:h-[15rem] xl:h-[17rem] overflow-hidden border border-museum-200 bg-museum-100 shrink-0 lg:mb-6 shadow-sm ring-2 ring-white/55 md:ring-4 [contain:layout_paint]">
             {avatar.type === 'generated' ? (
               <img
                 src={avatar.src}
                 alt={avatar.alt}
                 title={avatar.title}
+                width={320}
+                height={408}
                 loading="lazy"
                 decoding="async"
+                onError={() => setAvatarFailed(true)}
                 className="w-full h-full object-cover [filter:saturate(0.86)_contrast(0.95)]"
               />
             ) : avatar.type === 'portrait' ? (
-              <img src={avatar.src} alt={avatar.alt} title={avatar.title} className="w-full h-full object-cover grayscale opacity-90" />
+              <img
+                src={avatar.src}
+                alt={avatar.alt}
+                title={avatar.title}
+                width={320}
+                height={408}
+                loading="lazy"
+                decoding="async"
+                onError={() => setAvatarFailed(true)}
+                className="w-full h-full object-cover grayscale opacity-90"
+              />
             ) : (
               <div
                 className="relative w-full h-full flex items-center justify-center"
@@ -480,7 +498,7 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
   );
 
   return (
-    <article className="relative w-full min-w-0 overflow-hidden border border-museum-200/90 bg-white/70 shadow-none transition-all duration-500 md:bg-white/50 md:backdrop-blur-[4px] md:shadow-sm md:hover:-translate-y-0.5 md:hover:shadow-[0_24px_64px_rgba(44,42,38,0.10)]">
+    <article className="relative w-full min-w-0 overflow-hidden border border-museum-200/90 bg-white/70 shadow-none transition-all duration-500 [content-visibility:auto] [contain-intrinsic-size:900px] md:bg-white/50 md:backdrop-blur-[4px] md:shadow-sm md:hover:-translate-y-0.5 md:hover:shadow-[0_24px_64px_rgba(44,42,38,0.10)]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.62),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.38),rgba(242,240,235,0.14)_45%,rgba(255,255,255,0.24))] pointer-events-none" />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-museum-300/80 to-transparent pointer-events-none" />
       <div className={`relative flex flex-col lg:flex-row ${isReversed ? 'lg:flex-row-reverse' : ''}`}>
@@ -499,4 +517,4 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
   );
 };
 
-export default ThoughtVoiceCard;
+export default React.memo(ThoughtVoiceCard);

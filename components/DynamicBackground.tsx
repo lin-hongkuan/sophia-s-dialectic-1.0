@@ -6,6 +6,11 @@ interface DynamicBackgroundProps {
   showFrontOcclusion?: boolean;
 }
 
+const prefersReducedMotion = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+};
+
 // Pure-CSS background — always rendered first so the user sees the museum atmosphere even if
 // the three.js chunk is still loading (or fails to load on a flaky network).
 const CssBackground: React.FC = () => (
@@ -13,20 +18,24 @@ const CssBackground: React.FC = () => (
 );
 
 const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ showFrontOcclusion = false }) => {
-  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion);
+  const [webGlAvailable, setWebGlAvailable] = useState(true);
   // Defer mounting the R3F scene until the browser is idle so the first paint isn't blocked
   // by parsing the three.js chunk. The CSS background is visible the whole time.
   const [enableScene, setEnableScene] = useState(false);
 
   useEffect(() => {
-    const update = () => setIsMobile(window.innerWidth < 768);
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduceMotion(media.matches);
     update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
   }, []);
 
   useEffect(() => {
-    if (isMobile) return;
+    setEnableScene(false);
+    if (reduceMotion || !webGlAvailable) return;
     const w = window as Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
@@ -42,14 +51,20 @@ const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ showFrontOcclusio
       if (idleHandle !== null && typeof w.cancelIdleCallback === 'function') w.cancelIdleCallback(idleHandle);
       if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
     };
-  }, [isMobile]);
+  }, [reduceMotion, webGlAvailable]);
 
   return (
     <>
       <CssBackground />
-      {!isMobile && enableScene && (
+      {enableScene && (
         <Suspense fallback={null}>
-          <BackgroundScene showFrontOcclusion={showFrontOcclusion} />
+          <BackgroundScene
+            showFrontOcclusion={showFrontOcclusion}
+            onUnavailable={() => {
+              setWebGlAvailable(false);
+              setEnableScene(false);
+            }}
+          />
         </Suspense>
       )}
     </>

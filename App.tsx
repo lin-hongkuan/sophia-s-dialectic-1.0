@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions, regenerateThoughtVoice, resumeAnalysis } from './services/sophiaService';
-import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, RunSnapshot, RunSnapshotStage, ThoughtVoice, TokenUsage } from './types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { analyzeTopic, appendThoughtVoice, createPartialResult, generateQuestionSuggestions, regenerateThoughtVoice, regenerateVoiceAvatar, resumeAnalysis } from './services/sophiaService';
+import { ActiveAnalysisRun, AnalysisResult, ContinuationContext, GenerationLogEntry, HistoryEntry, RunControlHandle, RunSnapshot, RunSnapshotStage, ThoughtVoice, TokenUsage, VoiceInsertSeed } from './types';
 import Arena from './components/Arena';
-import ReasoningDisplay from './components/ReasoningDisplay';
 import RoundtableScene from './components/RoundtableScene';
 import DynamicBackground from './components/DynamicBackground';
 import HistoryPage from './components/HistoryPage';
@@ -14,7 +13,7 @@ import AnnouncementModal from './components/AnnouncementModal';
 import { HangingLabel } from './components/PageHero';
 import { PRELOADED_HISTORY_ENTRY } from './data/preloadedHistory';
 import { ANNOUNCEMENT } from './data/announcement';
-import { Info, ArrowRight, Sparkles, Megaphone } from 'lucide-react';
+import { Info, ArrowRight, Sparkles, Megaphone, Home } from 'lucide-react';
 import { validateUserPrompt } from './utils/inputValidation';
 import { recordUsage as recordTokenUsage } from './services/tokenAccounting';
 import { reframeUserTopic, type ReframeCandidate } from './services/topicReframe';
@@ -40,6 +39,7 @@ const HISTORY_KEY = 'sophia.history.v1';
 const ANNOUNCEMENT_DISMISSED_KEY = 'sophia.announcement.dismissed.v1';
 const HISTORY_LIMIT = 10;
 const HISTORY_EXPORT_VERSION = 1;
+const GENERATION_LOG_LIMIT = 300;
 const PRESET_HISTORY_KEY = 'sophia.preset.generated.feminism.v1';
 const PRESET_TOPIC = '女性主义有道理吗？';
 const DEFAULT_QUESTION_SUGGESTIONS = ['女性主义有道理吗？', '如何克服虚无主义？', '如何证明你不是缸中之脑？', '我们应该生孩子吗？', '为什么有性别不止有两个？'];
@@ -54,6 +54,30 @@ const ROUTES: Record<string, AppRoute> = {
   '/manifesto/': '/manifesto',
   '/settings': '/settings',
   '/settings/': '/settings',
+};
+
+const DIRECT_QUESTION_MARKERS = [
+  '?',
+  '？',
+  '吗',
+  '呢',
+  '什么',
+  '为什么',
+  '为何',
+  '如何',
+  '怎么',
+  '怎样',
+  '是否',
+  '能不能',
+  '有没有',
+  '该不该',
+  '应不应该',
+];
+
+const looksLikeDirectQuestion = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return DIRECT_QUESTION_MARKERS.some((marker) => trimmed.includes(marker));
 };
 
 const makeRunId = () => {
@@ -331,7 +355,19 @@ interface VoiceStreamThrottle {
   clearAll: () => void;
 }
 
-// Coalesces streaming voice deltas to a 120ms cadence so React doesn't re-render on every chunk.
+const appendCappedLog = (entries: GenerationLogEntry[], entry: GenerationLogEntry): GenerationLogEntry[] => {
+  const next = [...entries, entry];
+  return next.length > GENERATION_LOG_LIMIT ? next.slice(-GENERATION_LOG_LIMIT) : next;
+};
+
+const checkpointStageForProgress = (progress: GenerationProgress | null): RunSnapshotStage | null => {
+  if (!progress) return null;
+  if (progress.stage === 'done' || progress.stage === 'synthesis') return 'synthesis';
+  if (progress.stage === 'voices' || progress.stage === 'route') return 'route';
+  if (progress.stage === 'outline') return 'outline';
+  return null;
+};
+
 const createVoiceStreamThrottle = (
   applyVoiceText: (voiceId: string, fullText: string) => void,
 ): VoiceStreamThrottle => {
@@ -417,6 +453,7 @@ const App: React.FC = () => {
   const [suggestionError, setSuggestionError] = useState('');
   const [isAppendingVoice, setIsAppendingVoice] = useState(false);
   const [retryingVoiceId, setRetryingVoiceId] = useState<string | null>(null);
+  const [regeneratingAvatarVoiceId, setRegeneratingAvatarVoiceId] = useState<string | null>(null);
   const [reframeState, setReframeState] = useState<{
     open: boolean;
     originalTopic: string;
@@ -436,9 +473,71 @@ const App: React.FC = () => {
    *未完成的分析？". Cleared once the user picks resume / dismiss.
    */
   const [pendingResumeSnap, setPendingResumeSnap] = useState<RunSnapshot | null>(null);
+  /**
+   * Offline read-only mode. Tracks navigator.onLine + online/offline events so
+   * the home form can disable itself and the result/history views can carry a
+   * tasteful banner instead of letting the user kick off generation calls
+   * that will only fail at fetch time. Read-only browsing of cached history
+   * (localStorage) and previously generated avatars (IndexedDB) keeps working
+   * because neither needs the network.
+   */
+  const [isOffline, setIsOffline] = useState(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
   const conceptBackRouteRef = useRef<AppRoute>('/');
   const activeRunIdRef = useRef<string | null>(null);
   const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
+  /**
+   * Holds the {@link RunControlHandle} for the currently active analyze run.
+   * Stored in a ref (not state) because the handle is set asynchronously by
+   * analyzeTopic's onControl callback and we don't want to trigger re-renders
+   * just for that — the UI surface that uses it (RoundtableScene) reads the
+   * stable bound callbacks below, which already trigger the right renders via
+   * the active run state changes.
+   */
+  const activeRunControlRef = useRef<RunControlHandle | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const didInitialRouteFocusRef = useRef(false);
+  const handleCancelActiveRun = useCallback(() => {
+    activeRunControlRef.current?.cancel('用户取消生成');
+    const runId = activeRunIdRef.current;
+    if (!runId) return;
+    updateActiveRun(runId, (run) => ({
+      ...run,
+      status: 'cancelled',
+      error: '生成已取消。',
+      progress: {
+        ...(run.progress ?? { totalVoices: 0, completedVoices: 0, messages: [] }),
+        stage: 'error',
+        messages: ['生成已取消。已保留目前可见的内容。'],
+      },
+      log: appendCappedLog(run.log, {
+        id: `log-${Date.now()}-cancelled`,
+        ts: new Date().toISOString(),
+        level: 'warn',
+        stage: 'meta',
+        message: '用户取消了本次生成。',
+      }),
+    }));
+  }, []);
+  const handleSkipActiveVoice = useCallback((voiceId: string) => {
+    activeRunControlRef.current?.skipVoice(voiceId);
+  }, []);
+  const handleInsertActiveVoice = useCallback((prompt: string) => {
+    const seed: VoiceInsertSeed = { prompt };
+    activeRunControlRef.current?.insertVoice(seed);
+  }, []);
 
   const openRoute = (route: AppRoute, replace = false) => {
     const nextPresetEntry = loadGeneratedPreset() || PRELOADED_HISTORY_ENTRY;
@@ -456,6 +555,7 @@ const App: React.FC = () => {
       setSelectedSource('history');
       setView('result');
       void hydrateEntriesWithAvatars([nextPresetEntry]).then(([hydratedPreset]) => {
+        if (normalizeRoute(window.location.pathname) !== '/history/sample') return;
         if (hydratedPreset === nextPresetEntry) return;
         setPresetEntry(hydratedPreset);
         setSelectedHistoryResult(hydratedPreset.result);
@@ -465,6 +565,7 @@ const App: React.FC = () => {
 
     const conceptTargetFromRoute = parseConceptRoute(route);
     if (conceptTargetFromRoute) {
+      conceptBackRouteRef.current = deriveAnalysisRoute(conceptTargetFromRoute.analysisId);
       setSelectedSource(null);
       setSelectedHistoryResult(null);
       setConceptTarget(conceptTargetFromRoute);
@@ -483,6 +584,7 @@ const App: React.FC = () => {
         setSelectedSource('history');
         setView('result');
         void hydrateEntriesWithAvatars(storedHistory).then((hydrated) => {
+          if (normalizeRoute(window.location.pathname) !== `/history/${encodeURIComponent(historyId)}`) return;
           if (hydrated === storedHistory) return;
           setHistoryEntries(hydrated);
           const refreshed = hydrated.find((entry) => entry.id === historyId);
@@ -575,6 +677,17 @@ const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  useEffect(() => {
+    if (!didInitialRouteFocusRef.current) {
+      didInitialRouteFocusRef.current = true;
+      return;
+    }
+    if (reframeState?.open || announcementOpen) return;
+    window.requestAnimationFrame(() => {
+      mainRef.current?.focus({ preventScroll: true });
+    });
+  }, [announcementOpen, reframeState?.open, selectedSource, view]);
+
   const activeRunIsRunning = activeRun?.status === 'starting' || activeRun?.status === 'running';
   const allHistoryEntries = useMemo(() => [presetEntry, ...historyEntries], [presetEntry, historyEntries]);
   const displayedResult = selectedSource === 'active' ? activeRun?.result || null : selectedHistoryResult;
@@ -666,6 +779,14 @@ const App: React.FC = () => {
     return null;
   };
 
+  const deriveAnalysisRoute = (analysisId: string): AppRoute => {
+    const latestPreset = loadGeneratedPreset() || presetEntry;
+    if (latestPreset.result.id === analysisId || PRELOADED_HISTORY_ENTRY.result.id === analysisId) return '/history/sample';
+    const storedHistory = historyEntries.length > 0 ? historyEntries : loadHistory();
+    if (storedHistory.some((entry) => entry.id === analysisId)) return `/history/${encodeURIComponent(analysisId)}` as AppRoute;
+    return '/history';
+  };
+
   /**
    * Persist a result whose keywords have just been enriched. Routes to the
    * matching persistence path (active run state, preset cache, or normal
@@ -734,7 +855,7 @@ const App: React.FC = () => {
    */
   const writeRunSnapshot = (
     run: ActiveAnalysisRun,
-    lastCompletedStage: RunSnapshotStage | null,
+    lastCompletedStage: RunSnapshotStage | null = checkpointStageForProgress(run.progress),
     continuationContext?: ContinuationContext,
   ) => {
     void saveRunSnapshot({
@@ -747,7 +868,20 @@ const App: React.FC = () => {
       partialResult: run.result,
       continuationContext,
       isPresetRegeneration: run.isPresetRegeneration,
-      log: run.log,
+      log: run.log.slice(-GENERATION_LOG_LIMIT),
+    });
+  };
+
+  const updateActiveRunWithSnapshot = (
+    runId: string,
+    updater: (run: ActiveAnalysisRun) => ActiveAnalysisRun,
+    continuationContext?: ContinuationContext,
+    lastCompletedStage?: RunSnapshotStage | null,
+  ) => {
+    updateActiveRun(runId, (run) => {
+      const next = updater(run);
+      writeRunSnapshot(next, lastCompletedStage ?? checkpointStageForProgress(next.progress), continuationContext);
+      return next;
     });
   };
 
@@ -820,6 +954,9 @@ const App: React.FC = () => {
 
     try {
       const data = await analyzeTopic(trimmedTopic, {
+        onControl: (handle) => {
+          activeRunControlRef.current = handle;
+        },
         onProgress: (progress) => updateActiveRun(runId, (run) => ({ ...run, status: progress.stage === 'done' ? run.status : 'running', progress })),
         onOutline: (outline) => updateActiveRun(runId, (run) => {
           const next: ActiveAnalysisRun = { ...run, status: 'running', result: createPartialResult(outline), error: null };
@@ -831,6 +968,20 @@ const App: React.FC = () => {
           const next: ActiveAnalysisRun = { ...run, result: { ...run.result, routeMap } };
           writeRunSnapshot(next, 'route', continuationContext);
           return next;
+        }),
+        // User-driven mid-run inserts: the orchestrator emits a queued
+        // ThoughtVoice placeholder via onVoicePlanned BEFORE work starts. We
+        // append it (idempotently — guards against double-emits across stage
+        // boundaries) so the live RoundtableScene can render the new card
+        // immediately. Without this the inserted voice was invisible until
+        // analyzeTopic's final return value landed.
+        onVoicePlanned: (voice: ThoughtVoice) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          if (run.result.voices.some((v) => v.id === voice.id)) return run;
+          return {
+            ...run,
+            result: { ...run.result, voices: [...run.result.voices, voice] },
+          };
         }),
         onVoiceStart: (voiceId) => updateActiveRun(runId, (run) => run.result ? {
           ...run,
@@ -865,7 +1016,7 @@ const App: React.FC = () => {
           return next;
         }),
         onError: (message) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] } })),
-        onLog: (entry: GenerationLogEntry) => updateActiveRun(runId, (run) => ({ ...run, log: [...run.log, entry] })),
+        onLog: (entry: GenerationLogEntry) => updateActiveRunWithSnapshot(runId, (run) => ({ ...run, log: appendCappedLog(run.log, entry) }), continuationContext),
         onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
       }, continuationContext);
 
@@ -895,19 +1046,30 @@ const App: React.FC = () => {
       }
     } catch (err) {
       throttle.clearAll();
-      const message = err instanceof Error ? err.message : '发生了未知错误';
+      // AbortError = user clicked cancel. We surface it as a 'cancelled' run
+      // (not 'error') so the resume / "重新生成" UX doesn't treat it as a
+      // failure that the upstream model produced.
+      const isCancel = err instanceof Error && err.name === 'AbortError';
+      const message = isCancel ? '生成已取消。' : (err instanceof Error ? err.message : '发生了未知错误');
       updateActiveRun(runId, (run) => {
         const next: ActiveAnalysisRun = {
           ...run,
-          status: 'error',
+          status: isCancel ? 'cancelled' : 'error',
           error: message,
           progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] },
         };
-        // Mark snapshot as errored — pruneStaleRunSnapshots will clean it out
-        // eventually; findMostRecentResumable already filters non-running.
+        // Mark snapshot as errored / cancelled — pruneStaleRunSnapshots will
+        // clean it out eventually; findMostRecentResumable already filters
+        // non-running.
         writeRunSnapshot(next, null, continuationContext);
         return next;
       });
+    } finally {
+      // Drop the run handle regardless of outcome so a stale ref can't fire
+      // cancel/skip on the next run.
+      if (activeRunIdRef.current === runId) {
+        activeRunControlRef.current = null;
+      }
     }
   };
 
@@ -923,7 +1085,7 @@ const App: React.FC = () => {
 
     // Continuation flows are already a philosophical question (followUp / append branch
     // sourced from a prior analysis), so skip the reframe round-trip.
-    if (continuationContext) {
+    if (continuationContext || looksLikeDirectQuestion(candidate)) {
       startAnalysis(candidate, continuationContext);
       return;
     }
@@ -1138,6 +1300,44 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRegenerateAvatar = async (voiceId: string) => {
+    if (activeRunIsRunning || isAppendingVoice || regeneratingAvatarVoiceId) return;
+    const baseResult = displayedResult;
+    if (!baseResult) return;
+    const targetVoice = baseResult.voices.find((voice) => voice.id === voiceId);
+    if (!targetVoice) return;
+
+    setRegeneratingAvatarVoiceId(voiceId);
+
+    const sourceResult = selectedSource === 'history' && (baseResult.id === PRELOADED_HISTORY_ENTRY.result.id || baseResult.id === presetEntry.result.id)
+      ? { ...baseResult, id: makeRunId(), createdAt: new Date().toISOString() }
+      : baseResult;
+
+    if (sourceResult !== baseResult) {
+      pushRoute(`/history/${encodeURIComponent(sourceResult.id)}`);
+      setSelectedHistoryResult(sourceResult);
+      setTopic(sourceResult.topic);
+    }
+
+    try {
+      const avatar = await regenerateVoiceAvatar(sourceResult, voiceId);
+      const updatedResult: AnalysisResult = {
+        ...sourceResult,
+        voices: sourceResult.voices.map((voice) => voice.id === voiceId ? { ...voice, avatar } : voice),
+      };
+      updateDisplayedResult(() => updatedResult);
+      if (sourceResult.id === presetEntry.result.id) {
+        persistGeneratedPreset(updatedResult);
+      } else {
+        persistResult(updatedResult);
+      }
+    } catch (error) {
+      console.error('[Sophia] regenerate avatar failed:', error);
+    } finally {
+      setRegeneratingAvatarVoiceId(null);
+    }
+  };
+
   const handleRegenerateAll = () => {
     if (activeRunIsRunning || isAppendingVoice) return;
     const ctx = lastRunContextRef.current;
@@ -1249,6 +1449,9 @@ const App: React.FC = () => {
 
     try {
       const data = await resumeAnalysis(snap, {
+        onControl: (handle) => {
+          activeRunControlRef.current = handle;
+        },
         onProgress: (progress) => updateActiveRun(runId, (run) => ({ ...run, status: progress.stage === 'done' ? run.status : 'running', progress })),
         onOutline: (outline) => updateActiveRun(runId, (run) => {
           const next: ActiveAnalysisRun = { ...run, status: 'running', result: createPartialResult(outline), error: null };
@@ -1260,6 +1463,17 @@ const App: React.FC = () => {
           const next: ActiveAnalysisRun = { ...run, result: { ...run.result, routeMap } };
           writeRunSnapshot(next, 'route', continuationContext);
           return next;
+        }),
+        // Same insert-placeholder handling as the live analyze path. Resumed
+        // runs can also receive mid-flight inserts if the orchestrator
+        // re-enters the voices stage on resume.
+        onVoicePlanned: (voice: ThoughtVoice) => updateActiveRun(runId, (run) => {
+          if (!run.result) return run;
+          if (run.result.voices.some((v) => v.id === voice.id)) return run;
+          return {
+            ...run,
+            result: { ...run.result, voices: [...run.result.voices, voice] },
+          };
         }),
         onVoiceStart: (voiceId) => updateActiveRun(runId, (run) => run.result ? {
           ...run,
@@ -1292,7 +1506,7 @@ const App: React.FC = () => {
           return next;
         }),
         onError: (message) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] } })),
-        onLog: (entry: GenerationLogEntry) => updateActiveRun(runId, (run) => ({ ...run, log: [...run.log, entry] })),
+        onLog: (entry: GenerationLogEntry) => updateActiveRunWithSnapshot(runId, (run) => ({ ...run, log: appendCappedLog(run.log, entry) }), continuationContext),
         onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
       });
 
@@ -1315,17 +1529,22 @@ const App: React.FC = () => {
       else persistResult(data);
     } catch (err) {
       throttle.clearAll();
-      const message = err instanceof Error ? err.message : '发生了未知错误';
+      const isCancel = err instanceof Error && err.name === 'AbortError';
+      const message = isCancel ? '生成已取消。' : (err instanceof Error ? err.message : '发生了未知错误');
       updateActiveRun(runId, (run) => {
         const next: ActiveAnalysisRun = {
           ...run,
-          status: 'error',
+          status: isCancel ? 'cancelled' : 'error',
           error: message,
           progress: { stage: 'error', totalVoices: 0, completedVoices: 0, messages: [message] },
         };
         writeRunSnapshot(next, null, continuationContext);
         return next;
       });
+    } finally {
+      if (activeRunIdRef.current === runId) {
+        activeRunControlRef.current = null;
+      }
     }
   };
 
@@ -1374,6 +1593,15 @@ const App: React.FC = () => {
                 <span className="sr-only">查看公告</span>
               </button>
             )}
+            <button
+              onClick={goHome}
+              aria-label="回到首页"
+              title="回到首页"
+              className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs"
+            >
+              <Home className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden="true" />
+              <span className="hidden md:inline">Home</span>
+            </button>
             <button onClick={goHistory} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
             <button onClick={goManifesto} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
             <button onClick={goSettings} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
@@ -1381,7 +1609,24 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      <main className="flex-grow pt-20 md:pt-24 px-4 relative flex flex-col">
+      {/* Offline read-only banner — surfaces below the fixed nav. Read-only
+          browsing of history / sample / individual analyses keeps working
+          (localStorage + IndexedDB), so we only block the generation form. */}
+      {isOffline && (
+        <div className="fixed top-14 md:top-16 inset-x-0 z-40 border-b border-amber-300/70 bg-amber-50/95 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-center gap-2 text-[12px] text-amber-900">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-700" aria-hidden="true" />
+            <span>当前处于离线只读模式 · 历史记录与样本分析仍可正常阅读，新生成需要网络恢复后才能开始。</span>
+          </div>
+        </div>
+      )}
+
+      <main
+        ref={mainRef}
+        tabIndex={-1}
+        aria-label="Sophia's Dialectic 主内容"
+        className={`flex-grow ${isOffline ? 'pt-28 md:pt-32' : 'pt-20 md:pt-24'} px-4 relative flex flex-col focus:outline-none`}
+      >
         <AppErrorBoundary resetKey={`${view}-${selectedSource || 'none'}-${displayedResult?.id || 'empty'}`}>
         {showHome && (
           <div className="flex-grow flex flex-col items-center justify-center -mt-2 pt-6 pb-10 transition-all duration-700 animate-fade-in px-2 md:-mt-8 md:pt-8 md:pb-14 md:px-0">
@@ -1421,13 +1666,16 @@ const App: React.FC = () => {
                   setTopic(e.target.value);
                   if (topicHint) setTopicHint(null);
                 }}
-                placeholder={activeRunIsRunning ? '已有问题正在生成。' : '输入一个困惑...'}
+                placeholder={
+                  isOffline ? '当前离线 · 暂时无法生成新分析' :
+                  activeRunIsRunning ? '已有问题正在生成。' : '输入一个困惑...'
+                }
                 className="relative w-full px-5 py-4 pr-16 md:px-8 md:py-6 md:pr-20 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-300 focus:ring-0 focus:shadow-[0_8px_40px_rgb(0,0,0,0.08)] transition-all duration-300 placeholder:text-museum-300 font-serif text-left backdrop-blur-md disabled:opacity-70"
-                disabled={activeRunIsRunning || isReframing}
+                disabled={isOffline || activeRunIsRunning || isReframing}
               />
               <button
                 type="submit"
-                disabled={!topic || activeRunIsRunning || isReframing}
+                disabled={isOffline || !topic || activeRunIsRunning || isReframing}
                 className="absolute right-1.5 top-1.5 md:right-2 md:top-2 h-[calc(100%-12px)] md:h-[calc(100%-16px)] aspect-square bg-museum-900 text-museum-50 rounded-full flex items-center justify-center hover:bg-black transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group-hover:shadow-lg"
               >
                 {activeRunIsRunning || isReframing ? <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight className="w-5 h-5 md:w-6 md:h-6" />}
@@ -1571,8 +1819,12 @@ const App: React.FC = () => {
                 isAnalyzing={activeRunIsRunning}
                 isFinished={!activeRunIsRunning && !!displayedResult && displayedProgress?.stage === 'done'}
                 progress={displayedProgress}
+                startedAt={activeRun?.createdAt}
                 result={displayedResult}
                 log={activeRun?.log}
+                onCancel={activeRunIsRunning ? handleCancelActiveRun : undefined}
+                onSkipVoice={activeRunIsRunning ? handleSkipActiveVoice : undefined}
+                onInsertVoice={activeRunIsRunning ? handleInsertActiveVoice : undefined}
               />
             )}
 
@@ -1584,7 +1836,7 @@ const App: React.FC = () => {
                     type="button"
                     onClick={handleRegenerateAll}
                     className="mt-3 px-5 py-2 bg-museum-900 text-museum-50 rounded-full text-sm font-serif hover:bg-black transition-colors disabled:opacity-50"
-                    disabled={isAppendingVoice || !!retryingVoiceId}
+                    disabled={isAppendingVoice || !!retryingVoiceId || !!regeneratingAvatarVoiceId}
                   >
                     重新生成这份分析
                   </button>
@@ -1603,6 +1855,10 @@ const App: React.FC = () => {
                 isGenerating={selectedSource === 'active' && activeRunIsRunning}
                 isAppendingVoice={isAppendingVoice}
                 onOpenConcept={(keywordId) => goToConcept(displayedResult.id, keywordId)}
+                onRegenerateAll={selectedSource === 'active' || lastRunContextRef.current ? handleRegenerateAll : undefined}
+                isRegenerateAllDisabled={activeRunIsRunning || isAppendingVoice || !!retryingVoiceId || !!regeneratingAvatarVoiceId}
+                onRegenerateAvatar={handleRegenerateAvatar}
+                regeneratingAvatarVoiceId={regeneratingAvatarVoiceId}
               />
             )}
           </>
@@ -1615,9 +1871,14 @@ const App: React.FC = () => {
               <div className="max-w-2xl mx-auto mt-16 bg-white/90 border border-museum-200 rounded-xl p-8 text-center shadow-sm">
                 <h2 className="font-serif text-3xl text-museum-900 mb-3">这个概念已经离线</h2>
                 <p className="text-museum-600 leading-relaxed mb-6">来源分析不在当前历史中。可能是已被删除，或链接来自另一台设备的本地存储。</p>
-                <button onClick={goHome} className="px-6 py-3 bg-museum-900 text-museum-50 rounded-full font-serif hover:bg-black transition-colors">
-                  回到首页
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <button onClick={goHistory} className="px-6 py-3 bg-museum-900 text-museum-50 rounded-full font-serif hover:bg-black transition-colors">
+                    去历史里查找
+                  </button>
+                  <button onClick={goHome} className="px-6 py-3 border border-museum-300 bg-white/75 rounded-full font-serif text-museum-800 hover:bg-white transition-colors">
+                    回到首页
+                  </button>
+                </div>
               </div>
             );
           }

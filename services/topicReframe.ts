@@ -54,7 +54,7 @@ export const reframeUserTopic = async (rawTopic: string): Promise<TopicReframeRe
   const endpoint = `${cfg.apiBaseUrl}/chat/completions`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new DOMException('topic-reframe timeout', 'AbortError')), 30000);
+  const timeout = setTimeout(() => controller.abort(new DOMException('topic-reframe timeout', 'AbortError')), 8000);
 
   try {
     const response = await fetch(endpoint, {

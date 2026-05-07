@@ -24,10 +24,12 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
     ? `正在展开：${progress.currentVoiceName}${typeof progress.streamedChars === 'number' ? ` · ${progress.streamedChars} 字` : ''}`
     : progress?.messages?.slice(-1)[0];
   const statusText = isRunning ? '档案正在整理' : isCompleted ? '新档案已归卷' : '档案整理受阻';
+  const liveStatusText = isRunning ? `${statusText} · ${stageText}` : `${statusText} · ${title}`;
   const actionText = isRunning ? '回到生成' : isCompleted ? '查看结果' : '查看错误';
 
   return (
-    <section className="w-full max-w-3xl mx-auto animate-fade-in px-1 sm:px-0" aria-live={isRunning ? 'polite' : 'off'}>
+    <section className="w-full max-w-3xl mx-auto animate-fade-in px-1 sm:px-0">
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{liveStatusText}</span>
       <button
         onClick={onOpen}
         className="group relative w-full overflow-hidden border-y border-museum-300/70 bg-museum-50/55 text-left backdrop-blur-[4px] transition-colors hover:bg-white/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-museum-400/50"
@@ -46,7 +48,7 @@ const ActiveRunBanner: React.FC<ActiveRunBannerProps> = ({ activeRun, onOpen }) 
               </p>
               <p className="line-clamp-2 font-serif text-sm leading-snug text-museum-900 sm:truncate sm:text-base">{title}</p>
               {currentWork && isRunning && (
-                <p className="mt-0.5 line-clamp-2 text-xs text-museum-500 sm:truncate">{currentWork}</p>
+                <p className="mt-0.5 line-clamp-2 text-xs text-museum-500 sm:truncate" aria-hidden="true">{currentWork}</p>
               )}
             </div>
           </div>

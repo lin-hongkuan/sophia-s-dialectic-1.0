@@ -104,17 +104,13 @@ const popRunContext = (ctx: RunContext) => {
 const withStage = <T>(stage: TokenUsageStage, fn: () => Promise<T>, extra?: Pick<RunContext, 'voiceId' | 'voiceName'>): Promise<T> => {
   const top = currentRunContext();
   if (!top) return fn();
-  const previous: RunContext = { ...top };
-  top.stage = stage;
-  if (extra) {
-    top.voiceId = extra.voiceId;
-    top.voiceName = extra.voiceName;
-  }
-  return fn().finally(() => {
-    top.stage = previous.stage;
-    top.voiceId = previous.voiceId;
-    top.voiceName = previous.voiceName;
+  const ctx = pushRunContext({
+    ...top,
+    stage,
+    voiceId: extra?.voiceId ?? top.voiceId,
+    voiceName: extra?.voiceName ?? top.voiceName,
   });
+  return fn().finally(() => popRunContext(ctx));
 };
 
 const emitLog = (entry: Omit<GenerationLogEntry, 'id' | 'ts'> & { id?: string; ts?: string }) => {
@@ -2092,7 +2088,7 @@ export const analyzeTopic = async (
     report({
       stage: 'done',
       modeLabel: outline.modeLabel,
-      totalVoices: outline.voicePlans.length,
+      totalVoices: plannedVoiceTotal,
       completedVoices: completedVoices.length,
       messages: ['这份哲学分析已生成完成。'],
     });

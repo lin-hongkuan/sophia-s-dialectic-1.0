@@ -10,6 +10,22 @@
     <link rel="dns-prefetch" href="https://api.linhongkuan.com">
     <script>
       window.__bootStart = Date.now();
+      window.__showBootError = function (message, detail) {
+        var splash = document.getElementById('boot-splash');
+        var errorBox = document.getElementById('boot-error');
+        var detailBox = document.getElementById('boot-error-detail');
+        if (window.__bootSlowTimer) clearTimeout(window.__bootSlowTimer);
+        if (splash) splash.hidden = false;
+        if (errorBox) errorBox.hidden = false;
+        if (detailBox) detailBox.textContent = [message || '未知错误', detail || ''].filter(Boolean).join('\n\n');
+      };
+      window.addEventListener('error', function (event) {
+        window.__showBootError(event.message, event.error && (event.error.stack || event.error.message));
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        window.__showBootError('Promise 加载失败', reason && (reason.stack || reason.message || String(reason)));
+      });
       window.__bootSlowTimer = setTimeout(function () {
         var hint = document.getElementById('boot-slow-hint');
         if (hint) hint.setAttribute('data-visible', 'true');
@@ -122,11 +138,10 @@
         40% { opacity: 1; transform: scale(1); }
       }
 
-      /* Rubbing mini-game embedded in the boot splash. Built with vanilla
-         JS / SVG / canvas so it works before the React bundle finishes
-         downloading on cold-cache networks. Hidden until the user clicks
-         the discreet toggle that fades in 1.2s after first paint, so fast
-         loads (where React mounts in <1s) never see it. */
+      /* Archive puzzle embedded in the boot splash. Built with vanilla
+         JS / SVG so it works before the React bundle finishes downloading.
+         Hidden until the user clicks the discreet toggle that fades in 1.2s
+         after first paint, so fast loads never see it. */
       #boot-game-toggle {
         margin-top: 2.25rem;
         background: transparent;
@@ -161,27 +176,83 @@
         width: 240px;
         height: 240px;
         border: 1px solid #D1CCC0;
-        background: linear-gradient(135deg, #F4F0E6 0%, #ECE3D1 60%, #E2D7C0 100%);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: hidden;
+        background: linear-gradient(135deg, #F9F8F6 0%, #ECE3D1 100%);
         box-shadow: 0 1px 2px rgba(0,0,0,0.04);
       }
-      #boot-game .bg-svg {
+      #boot-game .bg-slot {
+        position: relative;
+        border: 1px solid rgba(44,42,38,0.14);
+        background: rgba(255,255,255,0.5);
+        cursor: pointer;
+        padding: 0;
+        overflow: hidden;
+      }
+      #boot-game .bg-slot[data-active="true"] { border-color: #2C2A26; background: #F9F8F6; }
+      #boot-game .bg-slot[data-wrong="true"] { border-color: #B91C1C; background: #FEF2F2; }
+      #boot-game .bg-fragment {
         position: absolute;
-        inset: 0;
+        inset: 10px;
+        width: calc(100% - 20px);
+        height: calc(100% - 20px);
+      }
+      #boot-game .bg-fragment[data-ghost="true"] { opacity: 0.09; }
+      #boot-game .bg-slot-label,
+      #boot-game .bg-piece-label {
+        position: absolute;
+        top: 0.35rem;
+        right: 0.35rem;
+        min-width: 1.2rem;
+        height: 1.2rem;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.55rem;
+        line-height: 1;
+      }
+      #boot-game .bg-slot-label {
+        border: 1px solid #D1CCC0;
+        color: #6E665A;
+        background: rgba(255,255,255,0.8);
+      }
+      #boot-game .bg-piece-label {
+        color: #F9F8F6;
+        background: #2C2A26;
+      }
+      #boot-game .bg-tray {
+        width: 240px;
+        margin-top: 0.75rem;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.45rem;
+      }
+      #boot-game .bg-piece {
+        position: relative;
+        aspect-ratio: 1 / 1;
+        border: 1px solid #E6E2D8;
+        background: linear-gradient(135deg, #F9F8F6, #E6E2D8);
+        cursor: pointer;
+        padding: 0;
+        overflow: hidden;
+        transition: transform 0.16s ease, border-color 0.16s ease;
+      }
+      #boot-game .bg-piece:hover,
+      #boot-game .bg-piece[data-selected="true"] {
+        transform: translateY(-1px);
+        border-color: #2C2A26;
+      }
+      #boot-game .bg-piece svg {
+        position: absolute;
+        inset: 8px;
         width: 100%;
         height: 100%;
-        padding: 8%;
-        box-sizing: border-box;
+        width: calc(100% - 16px);
+        height: calc(100% - 16px);
       }
-      #boot-game .bg-canvas {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        cursor: crosshair;
-        touch-action: none;
-        transition: opacity 0.7s ease;
-      }
-      #boot-game .bg-canvas[data-done="true"] { opacity: 0; pointer-events: none; }
       #boot-game .bg-meta {
         margin-top: 0.95rem;
         font-family: Georgia, "Playfair Display", serif;
@@ -238,7 +309,8 @@
       @media (prefers-reduced-motion: reduce) {
         #boot-game-toggle,
         #boot-game,
-        #boot-game .bg-canvas,
+        #boot-splash .boot-dots span,
+        #boot-game .bg-piece,
         #boot-game .bg-meta,
         #boot-game .bg-era {
           transition: none !important;
@@ -253,19 +325,17 @@
       <h1 class="boot-title">Sophia's <em>Dialectic</em></h1>
       <div class="boot-dots" aria-hidden="true"><span></span><span></span><span></span></div>
       <p id="boot-slow-hint">看起来网络较慢，正在尝试加载界面…如果长时间停留在这里，可以刷新页面再试。</p>
-      <button id="boot-game-toggle" type="button" aria-controls="boot-game" aria-expanded="false">想拓一件藏品吗 →</button>
-      <div id="boot-game" aria-label="拓本游戏">
-        <div class="bg-frame">
-          <svg class="bg-svg" viewBox="0 0 512 512" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
-          <canvas class="bg-canvas" width="240" height="240" aria-label="按住并拖动以涂抹拓本"></canvas>
-        </div>
+      <button id="boot-game-toggle" type="button" aria-controls="boot-game" aria-expanded="false">修复一件藏品 →</button>
+      <div id="boot-game" aria-label="藏品修复游戏">
+        <div class="bg-frame" aria-label="藏品展柜"></div>
+        <div class="bg-tray" aria-label="碎片托盘"></div>
         <div class="bg-meta">———</div>
         <div class="bg-era">&nbsp;</div>
         <div class="bg-controls">
-          <button type="button" data-action="reset">重新覆盖</button>
+          <button type="button" data-action="reset">重置</button>
           <button type="button" data-action="next">下一件 →</button>
         </div>
-        <div class="bg-hint">按住并拖动鼠标 / 手指，做一片拓本</div>
+        <div class="bg-hint">把散落的藏品碎片放回展柜。</div>
       </div>
       <div id="boot-error" hidden>
         <h2>页面加载失败</h2>
@@ -278,7 +348,7 @@
       </div>
     </div>
     <script>
-      /* Boot-splash rubbing game (vanilla, pre-React).
+      /* Boot-splash archive puzzle (vanilla, pre-React).
          Catalog mirrors services/rubbingArtifacts.ts; keep in sync if
          that file changes. The toggle button fades in 1.2s after first
          paint so quick loads don't see it.
@@ -315,7 +385,11 @@
         ];
 
         var SVG_NS = 'http://www.w3.org/2000/svg';
-        var state = { idx: -1, done: false, drawing: false, lastSample: 0, artifact: null };
+        var QUADRANTS = ['nw', 'ne', 'sw', 'se'];
+        var LABELS = { nw: 'A', ne: 'B', sw: 'C', se: 'D' };
+        var VIEWBOX = { nw: '0 0 256 256', ne: '256 0 256 256', sw: '0 256 256 256', se: '256 256 256 256' };
+        var TONES = { nw: '#2C2A26', ne: '#3D3932', sw: '#5B5246', se: '#746B5E' };
+        var state = { idx: -1, artifact: null, pieces: [], selected: null, done: false, streak: 0 };
 
         function pickArtifact() {
           if (ARTIFACTS.length === 1) return ARTIFACTS[0];
@@ -325,139 +399,145 @@
           return ARTIFACTS[n];
         }
 
-        function paintTexture(canvas) {
-          var ctx = canvas.getContext('2d');
-          if (!ctx) return;
-          var w = canvas.width, h = canvas.height;
-          ctx.globalCompositeOperation = 'source-over';
-          var grad = ctx.createLinearGradient(0, 0, 0, h);
-          grad.addColorStop(0, '#B0A492');
-          grad.addColorStop(1, '#988C78');
-          ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, w, h);
-          try {
-            var img = ctx.getImageData(0, 0, w, h);
-            var d = img.data;
-            for (var i = 0; i < d.length; i += 4) {
-              var n = (Math.random() - 0.5) * 36;
-              d[i] = Math.max(0, Math.min(255, d[i] + n));
-              d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n));
-              d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n));
-            }
-            ctx.putImageData(img, 0, 0);
-          } catch (_) { /* canvas tainted: skip noise */ }
+        function shuffle(items) {
+          var next = items.slice();
+          for (var i = next.length - 1; i > 0; i -= 1) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var t = next[i]; next[i] = next[j]; next[j] = t;
+          }
+          return next;
+        }
+
+        function freshPieces() {
+          state.pieces = shuffle(QUADRANTS).map(function (id) {
+            return { id: id, placed: false };
+          });
+          state.selected = null;
+          state.done = false;
+          state.streak = 0;
+        }
+
+        function fragment(artifact, quadrant, tone, ghost) {
+          var svg = document.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('viewBox', VIEWBOX[quadrant]);
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          svg.setAttribute('class', 'bg-fragment');
+          if (ghost) svg.setAttribute('data-ghost', 'true');
+          var path = document.createElementNS(SVG_NS, 'path');
+          path.setAttribute('d', artifact.path);
+          path.setAttribute('fill', tone);
+          svg.appendChild(path);
+          return svg;
+        }
+
+        function render() {
+          var frame = document.querySelector('#boot-game .bg-frame');
+          var tray = document.querySelector('#boot-game .bg-tray');
+          var meta = document.querySelector('#boot-game .bg-meta');
+          var era = document.querySelector('#boot-game .bg-era');
+          var hint = document.querySelector('#boot-game .bg-hint');
+          if (!frame || !tray || !state.artifact) return;
+          frame.textContent = '';
+          tray.textContent = '';
+
+          QUADRANTS.forEach(function (q) {
+            var placed = state.pieces.some(function (p) { return p.id === q && p.placed; });
+            var slot = document.createElement('button');
+            slot.type = 'button';
+            slot.className = 'bg-slot';
+            slot.setAttribute('data-slot', q);
+            if (state.selected === q) slot.setAttribute('data-active', 'true');
+            slot.setAttribute('aria-label', '展柜位置 ' + LABELS[q]);
+            slot.appendChild(fragment(state.artifact, q, placed ? '#2C2A26' : '#2C2A26', !placed));
+            var label = document.createElement('span');
+            label.className = 'bg-slot-label';
+            label.textContent = LABELS[q];
+            slot.appendChild(label);
+            frame.appendChild(slot);
+          });
+
+          state.pieces.filter(function (p) { return !p.placed; }).forEach(function (p) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'bg-piece';
+            btn.setAttribute('data-piece', p.id);
+            if (state.selected === p.id) btn.setAttribute('data-selected', 'true');
+            btn.setAttribute('aria-label', '碎片 ' + LABELS[p.id]);
+            btn.appendChild(fragment(state.artifact, p.id, TONES[p.id], false));
+            var label = document.createElement('span');
+            label.className = 'bg-piece-label';
+            label.textContent = LABELS[p.id];
+            btn.appendChild(label);
+            tray.appendChild(btn);
+          });
+
+          if (meta) {
+            meta.textContent = state.done ? state.artifact.title : 'Archive Puzzle';
+            if (state.done) meta.setAttribute('data-done', 'true');
+            else meta.removeAttribute('data-done');
+          }
+          if (era) {
+            era.textContent = state.done ? state.artifact.era : (state.pieces.filter(function (p) { return p.placed; }).length + '/4');
+            if (state.done) era.setAttribute('data-done', 'true');
+            else era.removeAttribute('data-done');
+          }
+          if (hint) {
+            hint.textContent = state.done
+              ? '展柜已合拢，可以换下一件藏品。'
+              : (state.selected ? '碎片 ' + LABELS[state.selected] + ' 已取出。' : '把散落的藏品碎片放回展柜。');
+          }
         }
 
         function loadArtifact() {
-          var artifact = pickArtifact();
-          state.artifact = artifact;
-          state.done = false;
-          state.lastSample = 0;
-          var svg = document.querySelector('#boot-game .bg-svg');
-          if (svg) {
-            while (svg.firstChild) svg.removeChild(svg.firstChild);
-            var node = document.createElementNS(SVG_NS, 'path');
-            node.setAttribute('d', artifact.path);
-            node.setAttribute('fill', '#3C342A');
-            svg.appendChild(node);
-          }
-          var canvas = document.querySelector('#boot-game .bg-canvas');
-          if (canvas) {
-            paintTexture(canvas);
-            canvas.removeAttribute('data-done');
-          }
-          var meta = document.querySelector('#boot-game .bg-meta');
-          var era = document.querySelector('#boot-game .bg-era');
-          if (meta) { meta.textContent = '———'; meta.removeAttribute('data-done'); }
-          if (era) { era.textContent = ' '; era.removeAttribute('data-done'); }
+          state.artifact = pickArtifact();
+          freshPieces();
+          render();
         }
 
-        function revealCompletely() {
-          var canvas = document.querySelector('#boot-game .bg-canvas');
-          if (!canvas) return;
-          var ctx = canvas.getContext('2d');
-          if (!ctx) return;
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.fillStyle = 'rgba(0,0,0,1)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.globalCompositeOperation = 'source-over';
-          canvas.setAttribute('data-done', 'true');
-          var meta = document.querySelector('#boot-game .bg-meta');
-          var era = document.querySelector('#boot-game .bg-era');
-          if (meta) { meta.textContent = state.artifact.title; meta.setAttribute('data-done', 'true'); }
-          if (era) { era.textContent = state.artifact.era; era.setAttribute('data-done', 'true'); }
-          state.done = true;
+        function resetCurrent() {
+          freshPieces();
+          render();
         }
 
-        function erase(canvas, x, y) {
-          if (state.done) return;
-          var ctx = canvas.getContext('2d');
-          if (!ctx) return;
-          var r = 22;
-          ctx.globalCompositeOperation = 'destination-out';
-          var g = ctx.createRadialGradient(x, y, 0, x, y, r);
-          g.addColorStop(0, 'rgba(0,0,0,1)');
-          g.addColorStop(0.55, 'rgba(0,0,0,0.7)');
-          g.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = g;
-          ctx.beginPath();
-          ctx.arc(x, y, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalCompositeOperation = 'source-over';
-          var now = Date.now();
-          if (now - state.lastSample > 150) {
-            state.lastSample = now;
-            try {
-              var img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              var d = img.data;
-              var t = 0, c = 0;
-              for (var i = 3; i < d.length; i += 32) { t++; if (d[i] < 24) c++; }
-              if (t > 0 && c / t >= 0.62) revealCompletely();
-            } catch (_) { /* ignore sampling failure */ }
+        function tryPlace(pieceId, slotId) {
+          if (!pieceId || !slotId || state.done) return;
+          if (pieceId !== slotId) {
+            var wrong = document.querySelector('#boot-game [data-slot="' + slotId + '"]');
+            if (wrong) {
+              wrong.setAttribute('data-wrong', 'true');
+              setTimeout(function () { wrong.removeAttribute('data-wrong'); }, 420);
+            }
+            state.streak = 0;
+            return;
           }
+          state.pieces = state.pieces.map(function (p) {
+            return p.id === pieceId ? { id: p.id, placed: true } : p;
+          });
+          state.selected = null;
+          state.streak += 1;
+          state.done = state.pieces.every(function (p) { return p.placed; });
+          render();
         }
 
         function setupInteractions() {
-          var canvas = document.querySelector('#boot-game .bg-canvas');
-          if (!canvas) return;
           loadArtifact();
-          function localXY(e) {
-            var rect = canvas.getBoundingClientRect();
-            return [
-              ((e.clientX - rect.left) / rect.width) * canvas.width,
-              ((e.clientY - rect.top) / rect.height) * canvas.height
-            ];
-          }
-          canvas.addEventListener('pointerdown', function (e) {
-            if (state.done) return;
-            state.drawing = true;
-            try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-            var p = localXY(e); erase(canvas, p[0], p[1]);
+          var frame = document.querySelector('#boot-game .bg-frame');
+          var tray = document.querySelector('#boot-game .bg-tray');
+          if (tray) tray.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-piece]');
+            if (!btn) return;
+            state.selected = btn.getAttribute('data-piece');
+            render();
           });
-          canvas.addEventListener('pointermove', function (e) {
-            if (!state.drawing) return;
-            var p = localXY(e); erase(canvas, p[0], p[1]);
+          if (frame) frame.addEventListener('click', function (e) {
+            var slot = e.target.closest('[data-slot]');
+            if (!slot) return;
+            tryPlace(state.selected, slot.getAttribute('data-slot'));
           });
-          function endDraw(e) {
-            state.drawing = false;
-            try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
-          }
-          canvas.addEventListener('pointerup', endDraw);
-          canvas.addEventListener('pointercancel', endDraw);
-          canvas.addEventListener('pointerleave', endDraw);
 
           var resetBtn = document.querySelector('#boot-game button[data-action="reset"]');
           var nextBtn = document.querySelector('#boot-game button[data-action="next"]');
-          if (resetBtn) resetBtn.addEventListener('click', function () {
-            paintTexture(canvas);
-            canvas.removeAttribute('data-done');
-            var meta = document.querySelector('#boot-game .bg-meta');
-            var era = document.querySelector('#boot-game .bg-era');
-            if (meta) { meta.textContent = '———'; meta.removeAttribute('data-done'); }
-            if (era) { era.textContent = ' '; era.removeAttribute('data-done'); }
-            state.done = false;
-            state.lastSample = 0;
-          });
+          if (resetBtn) resetBtn.addEventListener('click', resetCurrent);
           if (nextBtn) nextBtn.addEventListener('click', loadArtifact);
         }
 

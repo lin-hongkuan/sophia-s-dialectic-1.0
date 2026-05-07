@@ -45,11 +45,18 @@ const GL_OPTIONS = {
 // context, but it still prints "THREE.WebGLRenderer: Context Lost." once per loss. Adding our
 // own listener lets us also catch contextcreationerror (which three doesn't log) and gives us
 // a hook for future restore-time work.
-const attachContextHandlers = (gl: THREE.WebGLRenderer) => {
+const attachContextHandlers = (gl: THREE.WebGLRenderer, onUnavailable?: () => void) => {
   const canvas = gl.domElement;
-  const onLost = (event: Event) => event.preventDefault();
+  const onLost = (event: Event) => {
+    event.preventDefault();
+    onUnavailable?.();
+  };
+  const onCreationError = (event: Event) => {
+    event.preventDefault();
+    onUnavailable?.();
+  };
   canvas.addEventListener('webglcontextlost', onLost, false);
-  canvas.addEventListener('webglcontextcreationerror', onLost, false);
+  canvas.addEventListener('webglcontextcreationerror', onCreationError, false);
 };
 
 const ResponsiveCamera = () => {
@@ -122,9 +129,10 @@ const MacroscopicWave = ({ frontOnly = false }: { frontOnly?: boolean }) => {
 
 interface BackgroundSceneProps {
   showFrontOcclusion?: boolean;
+  onUnavailable?: () => void;
 }
 
-const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = false }) => {
+const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = false, onUnavailable }) => {
   // Pause both Canvases when the tab is hidden so the GPU isn't burning cycles in the background.
   // This is the only behavioral change vs. the original (the original ran at 60fps even when hidden);
   // it is invisible to the user when the tab is foregrounded.
@@ -144,7 +152,7 @@ const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = 
           frameloop={frameloop}
           gl={GL_OPTIONS}
           style={{ pointerEvents: 'none' }}
-          onCreated={({ gl }) => attachContextHandlers(gl)}
+          onCreated={({ gl }) => attachContextHandlers(gl, onUnavailable)}
         >
           <ResponsiveCamera />
           <ambientLight intensity={0.5} />
@@ -175,7 +183,7 @@ const BackgroundScene: React.FC<BackgroundSceneProps> = ({ showFrontOcclusion = 
             style={{ pointerEvents: 'none' }}
             onCreated={({ gl }) => {
               gl.localClippingEnabled = true;
-              attachContextHandlers(gl);
+              attachContextHandlers(gl, onUnavailable);
             }}
           >
             <ResponsiveCamera />
