@@ -63,6 +63,7 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -72,12 +73,18 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
     setStreamingText('');
     setError(null);
     setInput('');
+    setClearConfirmOpen(false);
   }, [open, result.id, voice.id]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (clearConfirmOpen) {
+        setClearConfirmOpen(false);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     const previousOverflow = document.body.style.overflow;
@@ -88,7 +95,7 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
       document.body.style.overflow = previousOverflow;
       window.clearTimeout(focusTimer);
     };
-  }, [open, onClose]);
+  }, [open, onClose, clearConfirmOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -124,11 +131,12 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
   };
 
   const handleClear = () => {
-    if (typeof window !== 'undefined' && !window.confirm(`清空与 ${voice.name} 的对话记录？`)) return;
     clearVoiceChat(result.id, voice.id);
     setMessages([]);
     setStreamingText('');
     setError(null);
+    setClearConfirmOpen(false);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
   if (!open) return null;
@@ -145,6 +153,46 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
       }}
     >
       <div className="relative w-full md:w-[min(720px,92vw)] md:max-h-[88vh] bg-museum-50/95 backdrop-blur-md border-y md:border border-museum-200 shadow-[0_30px_80px_rgba(44,42,38,0.25)] flex flex-col">
+        {clearConfirmOpen && (
+          <div
+            className="absolute inset-0 z-20 flex items-center justify-center bg-museum-900/30 px-5 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-voice-chat-title"
+            aria-describedby="clear-voice-chat-desc"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setClearConfirmOpen(false);
+            }}
+          >
+            <div className="w-full max-w-sm border border-museum-300 bg-museum-50/95 p-5 shadow-[0_24px_70px_rgba(44,42,38,0.28)]">
+              <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500">
+                Archive Action
+              </p>
+              <h3 id="clear-voice-chat-title" className="font-serif text-xl text-museum-900">
+                清空与 {voice.name} 的对话？
+              </h3>
+              <p id="clear-voice-chat-desc" className="mt-3 text-sm leading-relaxed text-museum-600">
+                这只会删除本地保存的这段对话记录，不会影响已经生成的分析正文。
+              </p>
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setClearConfirmOpen(false)}
+                  className="border border-museum-300 bg-white/60 px-4 py-2 text-xs font-mono uppercase tracking-widest text-museum-600 transition-colors hover:bg-white hover:text-museum-900"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="inline-flex items-center gap-2 border border-red-900/80 bg-red-900 px-4 py-2 text-xs font-mono uppercase tracking-widest text-red-50 transition-colors hover:bg-red-950"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> 清空
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-start gap-4 p-5 md:p-7 border-b border-museum-200/80 bg-white/60">
           <div className="w-14 h-14 md:w-16 md:h-16 shrink-0 overflow-hidden border border-museum-200 bg-museum-100 ring-2 ring-white/55">
             {avatarUrl ? (
@@ -244,8 +292,9 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
             <div className="mt-3 flex justify-end">
               <button
                 type="button"
-                onClick={handleClear}
-                className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-widest text-museum-400 hover:text-museum-700 transition-colors"
+                onClick={() => setClearConfirmOpen(true)}
+                disabled={isStreaming}
+                className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-widest text-museum-400 transition-colors hover:text-museum-700 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Trash2 className="w-3 h-3" /> 清空对话
               </button>
