@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Eraser } from 'lucide-react';
-import { pickRandomArtifact, RubbingArtifact } from '../services/rubbingArtifacts';
+import { pickRandomArtifact, RUBBING_VIEWBOX, RubbingArtifact } from '../services/rubbingArtifacts';
 
 interface RubbingGameProps {
   /** panel = full size for generation page; compact = small embed. */
@@ -203,22 +203,12 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
           aria-hidden
         >
           <svg
-            viewBox="0 0 100 100"
+            viewBox={RUBBING_VIEWBOX}
             className="absolute inset-0 w-full h-full"
             preserveAspectRatio="xMidYMid meet"
-            style={{ padding: '14%' }}
+            style={{ padding: '8%' }}
           >
-            {artifact.paths.map((p, i) => (
-              <path
-                key={i}
-                d={p.d}
-                stroke="#3C342A"
-                strokeWidth={p.strokeWidth ?? 0.6}
-                fill={p.fill ?? 'none'}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ))}
+            <path d={artifact.path} fill="#3C342A" />
           </svg>
         </div>
 
@@ -288,6 +278,27 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
       </div>
 
       <p className="mt-3 text-[10px] text-museum-400 text-center max-w-xs">{hint}</p>
+
+      <p className="mt-2 text-[9px] text-museum-300 text-center font-mono tracking-wider">
+        Silhouettes by{' '}
+        <a
+          href="https://game-icons.net"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline-offset-2 hover:underline hover:text-museum-500"
+        >
+          game-icons.net
+        </a>
+        {' '}·{' '}
+        <a
+          href="https://creativecommons.org/licenses/by/3.0/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline-offset-2 hover:underline hover:text-museum-500"
+        >
+          CC BY 3.0
+        </a>
+      </p>
     </div>
   );
 };
