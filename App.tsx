@@ -575,17 +575,30 @@ const App: React.FC = () => {
 
     const historyId = routeHistoryId(route);
     if (historyId && historyId !== 'sample') {
+      const inMemoryEntry = historyEntries.find((entry) => entry.id === historyId)
+        || (selectedHistoryResult?.id === historyId
+          ? {
+            id: selectedHistoryResult.id,
+            topic: selectedHistoryResult.topic,
+            title: selectedHistoryResult.philosophical_title,
+            mode: selectedHistoryResult.mode,
+            modeLabel: selectedHistoryResult.modeLabel,
+            createdAt: selectedHistoryResult.createdAt,
+            result: selectedHistoryResult,
+          }
+          : null);
       const storedHistory = loadHistory();
-      const historyEntry = storedHistory.find((entry) => entry.id === historyId);
+      const historyEntry = inMemoryEntry || storedHistory.find((entry) => entry.id === historyId);
       if (historyEntry) {
-        setHistoryEntries(storedHistory);
+        const nextHistoryEntries = historyEntries.some((entry) => entry.id === historyId) ? historyEntries : storedHistory;
+        setHistoryEntries(nextHistoryEntries);
         setSelectedHistoryResult(historyEntry.result);
         setTopic(historyEntry.topic);
         setSelectedSource('history');
         setView('result');
-        void hydrateEntriesWithAvatars(storedHistory).then((hydrated) => {
+        void hydrateEntriesWithAvatars(nextHistoryEntries).then((hydrated) => {
           if (normalizeRoute(window.location.pathname) !== `/history/${encodeURIComponent(historyId)}`) return;
-          if (hydrated === storedHistory) return;
+          if (hydrated === nextHistoryEntries) return;
           setHistoryEntries(hydrated);
           const refreshed = hydrated.find((entry) => entry.id === historyId);
           if (refreshed) setSelectedHistoryResult(refreshed.result);
