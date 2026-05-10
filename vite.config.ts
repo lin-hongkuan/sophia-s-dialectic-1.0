@@ -49,17 +49,18 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2020',
       sourcemap: false,
+      chunkSizeWarningLimit: 800,
       // Don't emit a <link rel="modulepreload"> for the lazy three.js chunk —
       // we want it to load only after the home page becomes interactive (via
       // requestIdleCallback inside DynamicBackground).
       modulePreload: {
-        resolveDependencies: (_filename, deps) => deps.filter((dep) => !/(?:^|\/)three-bg-/.test(dep) && !/(?:^|\/)BackgroundScene-/.test(dep)),
+        resolveDependencies: (_filename, deps) => deps.filter((dep) => !/(?:^|\/)three-bg-/.test(dep) && !/(?:^|\/)BackgroundScene-/.test(dep) && !/(?:^|\/)vendor-bg-/.test(dep)),
       },
       rollupOptions: {
         output: {
           manualChunks: (id) => {
             if (!id.includes('node_modules')) return undefined;
-            if (id.includes('three') || id.includes('@react-three')) return 'three-bg';
+            if (id.includes('three') || id.includes('@react-three')) return 'vendor-bg';
             if (id.includes('react-dom')) return 'react-dom';
             if (id.includes('react') || id.includes('scheduler')) return 'react';
             if (id.includes('lucide-react')) return 'icons';

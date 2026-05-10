@@ -21,6 +21,32 @@ interface PersistedShape {
 
 const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
+type TokenUsageInput = Partial<TokenUsage> | null | undefined;
+
+const safeString = (value: unknown): string => typeof value === 'string' ? value : '';
+const safeNumber = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+const normalizeRecord = (entry: TokenUsageInput): TokenUsage | null => {
+  if (!entry || typeof entry !== 'object') return null;
+  const promptTokens = safeNumber(entry.promptTokens);
+  const completionTokens = safeNumber(entry.completionTokens);
+  const totalTokens = safeNumber(entry.totalTokens) || promptTokens + completionTokens;
+  if (totalTokens <= 0) return null;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    model: safeString(entry.model) || '(unknown)',
+    stage: (safeString(entry.stage) || 'meta') as TokenUsageStage,
+    ts: safeString(entry.ts) || new Date(0).toISOString(),
+    voiceId: safeString(entry.voiceId) || undefined,
+  };
+};
+
+const normalizeRecords = (records: unknown): TokenUsage[] => Array.isArray(records)
+  ? records.map((entry) => normalizeRecord(entry as TokenUsageInput)).filter((entry): entry is TokenUsage => !!entry)
+  : [];
+
 let cache: TokenUsage[] = loadFromStorage();
 let pending: TokenUsage[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -31,8 +57,8 @@ function loadFromStorage(): TokenUsage[] {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Partial<PersistedShape> | TokenUsage[];
-    if (Array.isArray(parsed)) return parsed; // legacy shape, just adopt
-    if (parsed && Array.isArray(parsed.records)) return parsed.records;
+    if (Array.isArray(parsed)) return normalizeRecords(parsed);
+    if (parsed && Array.isArray(parsed.records)) return normalizeRecords(parsed.records);
     return [];
   } catch {
     return [];
@@ -40,16 +66,13 @@ function loadFromStorage(): TokenUsage[] {
 }
 
 function persistNow() {
-  if (!isBrowser) {
-    pending = [];
-    return;
-  }
   if (pending.length === 0) return;
   cache = cache.concat(pending);
   pending = [];
   if (cache.length > MAX_RECORDS) {
     cache = cache.slice(cache.length - MAX_RECORDS);
   }
+  if (!isBrowser) return;
   try {
     const payload: PersistedShape = { schemaVersion: 1, records: cache };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -68,15 +91,16 @@ function scheduleFlush() {
 }
 
 export const recordUsage = (entry: TokenUsage): void => {
-  if (!entry || entry.totalTokens <= 0) return;
-  pending.push(entry);
+  const normalized = normalizeRecord(entry);
+  if (!normalized) return;
+  pending.push(normalized);
   scheduleFlush();
 };
 
 export const recordUsageBatch = (entries: TokenUsage[]): void => {
   if (!entries || entries.length === 0) return;
-  pending.push(...entries.filter((entry) => entry && entry.totalTokens > 0));
-  scheduleFlush();
+  pending.push(...entries.map((entry) => normalizeRecord(entry)).filter((entry): entry is TokenUsage => !!entry));
+  if (pending.length > 0) scheduleFlush();
 };
 
 export const flushNow = (): void => {
@@ -168,18 +192,23 @@ export const clearAll = (): void => {
   }
 };
 
+const csvValue = (value: unknown): string => {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
 export const exportCsv = (): string => {
   flushNow();
   const header = 'ts,stage,model,promptTokens,completionTokens,totalTokens,voiceId';
   const rows = cache.map((entry) => [
     entry.ts,
     entry.stage,
-    entry.model.replace(/[",]/g, ' '),
+    entry.model,
     entry.promptTokens,
     entry.completionTokens,
     entry.totalTokens,
     entry.voiceId || '',
-  ].join(','));
+  ].map(csvValue).join(','));
   return [header, ...rows].join('\n');
 };
 
@@ -205,3 +234,10 @@ export const buildUsage = (
     voiceId,
   };
 };
+
+if (isBrowser) {
+  window.addEventListener('pagehide', flushNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushNow();
+  });
+}

@@ -16,6 +16,7 @@ import {
   TensionFocus,
   ThoughtVoice,
   ThoughtVoiceImageAvatar,
+  ThoughtExperimentImage,
   TokenUsage,
   TokenUsageStage,
   VoiceInsertSeed,
@@ -43,6 +44,7 @@ import { getActiveConfig } from './sophiaConfig';
 import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
 import { ModelJsonParseError, parseModelJson } from './jsonResponse';
 import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './stageCache';
+import { apiErrorMessage, chatEndpoint, fetchWithRetry, imageEndpoint, requestHeaders, type ChatMessage } from './apiClient';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
@@ -129,28 +131,43 @@ const emitLog = (entry: Omit<GenerationLogEntry, 'id' | 'ts'> & { id?: string; t
   });
 };
 
-/**
- * Heartbeat helper for long blocking single LLM calls (outline / route / synthesis).
- * The user's pain: a 20-30s call emits one log line then nothing — feels frozen.
- * Heartbeat emits a 'detail' tick every ~10s so the log feed shows the system is alive.
- * Cleanup is idempotent.
- */
-const startHeartbeat = (stage: GenerationLogEntry['stage'], label: string, intervalMs = 10000) => {
+const HEARTBEAT_MESSAGES: Partial<Record<GenerationLogEntry['stage'], string[]>> = {
+  outline: [
+    '[keepalive] outline · waiting on /chat/completions JSON response',
+    '[keepalive] outline · parsing questionFrame / programStructure / routeMap / voicePlans',
+    '[keepalive] outline · server-side reasoning still running',
+  ],
+  route: [
+    '[keepalive] route · waiting on /chat/completions JSON response',
+    '[keepalive] route · expanding routeMap nodes and tension links',
+    '[keepalive] route · server-side reasoning still running',
+  ],
+  synthesis: [
+    '[keepalive] synthesis · waiting on /chat/completions JSON response',
+    '[keepalive] synthesis · merging tensions / keywords / followUps / conclusion',
+    '[keepalive] synthesis · server-side reasoning still running',
+  ],
+};
+
+const startHeartbeat = (stage: GenerationLogEntry['stage'], label: string, intervalMs = 18000) => {
   if (typeof window === 'undefined') return () => {};
-  const startedAt = Date.now();
+  const messages = HEARTBEAT_MESSAGES[stage] || [label];
   const ctx = currentRunContext();
   const voiceId = ctx?.voiceId;
   const voiceName = ctx?.voiceName;
-  const handle = window.setInterval(() => {
-    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+  let index = 0;
+  const emitBeat = () => {
+    const message = messages[index % messages.length];
+    index += 1;
     emitLog({
       level: 'detail',
       stage,
       voiceId,
       voiceName,
-      message: `${label}（已等待 ${elapsedSec}s，模型仍在处理...）`,
+      message: `${message}。`,
     });
-  }, intervalMs);
+  };
+  const handle = window.setInterval(emitBeat, intervalMs);
   return () => window.clearInterval(handle);
 };
 
@@ -167,17 +184,6 @@ const recordUsageFromResponse = (
   return usage;
 };
 
-const requestHeaders = () => {
-  const cfg = getActiveConfig();
-  return {
-    'Content-Type': 'application/json',
-    ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
-  };
-};
-
-const chatEndpoint = () => `${getActiveConfig().apiBaseUrl}/chat/completions`;
-const imageEndpoint = () => `${getActiveConfig().apiBaseUrl}/images/generations`;
-
 const shortRandomId = (): string => {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return uuid.replace(/-/g, '').slice(0, 8);
@@ -187,124 +193,6 @@ const shortRandomId = (): string => {
 const makeId = (prefix: string) => `${prefix}-${Date.now()}-${shortRandomId()}`;
 
 const parseJson = <T>(content: string): T => parseModelJson<T>(content);
-
-const isTransientStatus = (status: number) => status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const isRetryableNetworkError = (error: unknown): boolean => {
-  if (!error) return false;
-  if (error instanceof Error) {
-    // AbortError: our timeout fired (caller signal handled separately)
-    if (error.name === 'AbortError') return true;
-    // Most browsers throw TypeError for DNS / TLS / offline / ECONNRESET
-    if (error.name === 'TypeError') return true;
-    if (/network|failed to fetch|load failed|fetch failed/i.test(error.message || '')) return true;
-  }
-  return false;
-};
-
-const computeBackoffMs = (attempt: number) => {
-  const base = 800 * Math.pow(2, attempt);
-  const jitter = Math.floor(Math.random() * 400);
-  return Math.min(base + jitter, 8000);
-};
-
-interface FetchWithRetryOptions {
-  /** Per-attempt request timeout (driven by AbortController). Default 60s. */
-  timeoutMs?: number;
-  /** Total attempts including the first. Default 4. */
-  maxAttempts?: number;
-  /** External cancel signal forwarded to fetch. */
-  signal?: AbortSignal;
-  /** Short label that goes into the warn log so different call sites are distinguishable. */
-  label?: string;
-}
-
-const fetchWithRetry = async (
-  input: RequestInfo,
-  init: RequestInit = {},
-  { timeoutMs = 60000, maxAttempts = 4, signal, label = 'sophia-fetch' }: FetchWithRetryOptions = {},
-): Promise<Response> => {
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (signal?.aborted) throw new DOMException('aborted by caller', 'AbortError');
-
-    const controller = new AbortController();
-    const onCallerAbort = () => controller.abort(signal?.reason);
-    if (signal) signal.addEventListener('abort', onCallerAbort, { once: true });
-    const timeoutId = setTimeout(
-      () => controller.abort(new DOMException(`timeout after ${timeoutMs}ms`, 'AbortError')),
-      timeoutMs,
-    );
-
-    const startedAt = Date.now();
-    try {
-      const response = await fetch(input, { ...init, signal: controller.signal });
-      clearTimeout(timeoutId);
-      signal?.removeEventListener('abort', onCallerAbort);
-
-      if (response.ok) return response;
-      const isLastAttempt = attempt === maxAttempts - 1;
-      if (!isTransientStatus(response.status) || isLastAttempt) return response;
-
-      // Transient HTTP: drain body so the connection can be reused, then back off.
-      try { await response.text(); } catch { /* body may already be closed */ }
-      const backoff = computeBackoffMs(attempt);
-      // eslint-disable-next-line no-console
-      console.warn(`[sophia][${label}] transient HTTP ${response.status} on attempt ${attempt + 1}/${maxAttempts}, retrying in ${backoff}ms`);
-      await wait(backoff);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      signal?.removeEventListener('abort', onCallerAbort);
-      lastError = error;
-      const isLastAttempt = attempt === maxAttempts - 1;
-      // Caller cancellation always propagates.
-      if (signal?.aborted) throw error;
-      const retryable = isRetryableNetworkError(error);
-      if (!retryable || isLastAttempt) throw error;
-      const backoff = computeBackoffMs(attempt);
-      const elapsed = Date.now() - startedAt;
-      const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      // eslint-disable-next-line no-console
-      console.warn(`[sophia][${label}] network error on attempt ${attempt + 1}/${maxAttempts} after ${elapsed}ms (${reason}), retrying in ${backoff}ms`);
-      await wait(backoff);
-    }
-  }
-  throw lastError ?? new Error(`[sophia][${label}] retries exhausted`);
-};
-
-const apiErrorMessage = async (response: Response) => {
-  const cfg = getActiveConfig();
-  const errorData = await response.json().catch(() => ({}));
-  const upstream = errorData?.error?.message || errorData?.message || '';
-  const code = errorData?.error?.code || '';
-  const status = response.status;
-
-  let summary = '';
-  if (status === 401) {
-    summary = 'API key 无效或已过期，请到设置页检查 / 更换 key。';
-  } else if (status === 403) {
-    summary = '当前 key 无权访问该模型，可能是账号未开通或被限制。';
-  } else if (status === 404) {
-    summary = '模型名错误或服务未上线。请到设置页检查 model 字段是否拼写正确。';
-  } else if (status === 408) {
-    summary = '上游响应超时，已自动重试仍失败。请稍后再试。';
-  } else if (status === 429) {
-    summary = '触发了配额或限流。请稍后重试或更换一个限额更高的 key / 模型。';
-  } else if (status >= 500 && status < 600) {
-    summary = '上游服务波动，已自动重试仍失败。可以稍后再试，或在设置页换一个 provider。';
-  } else if (status >= 400 && status < 500) {
-    summary = `请求被 ${cfg.apiProvider} 拒绝（${status}）。请检查请求参数或更换模型。`;
-  } else {
-    summary = `${cfg.apiProvider} API 请求失败（HTTP ${status}）。`;
-  }
-
-  const trail: string[] = [];
-  if (upstream) trail.push(upstream);
-  if (code && code !== upstream) trail.push(`code=${code}`);
-  return trail.length > 0 ? `${summary}（${trail.join(' · ')}）` : summary;
-};
 
 // Avatar request semaphore — caps concurrent /images/generations calls so a slow image
 // model can't stack up requests when several voices are running in parallel. The limit is
@@ -422,7 +310,9 @@ export const generateThoughtVoiceAvatar = async (
       return {
         imageUrl,
         prompt,
-        style: resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
+        style: voicePlan.kind === 'philosopher'
+          ? resolveHistoricalPhilosopherAvatarStyle(cfg.promptOverrides)
+          : resolveThoughtVoiceAvatarStyle(cfg.promptOverrides),
         model: cfg.avatarImageModel,
         alt: `${voicePlan.name} 的竖版思想声音头像`,
         generatedAt: new Date().toISOString(),
@@ -462,8 +352,6 @@ const parseSseResponse = (text: string): unknown => {
 // the JSON in **bold** or prepend prose; this clause is a stronger lever.
 const STRICT_JSON_REINFORCEMENT = '严格规则：仅输出一个有效的 JSON 对象。不要使用 Markdown 代码围栏（``` 或 ```json），不要加粗体（**）或斜体（*、_）修饰，不要在 JSON 前后添加任何文字、注释或致谢。整个回复必须能被 JSON.parse 直接解析。';
 
-type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-
 const callChatJsonOnce = async <T>(
   messages: ChatMessage[],
   maxTokens: number,
@@ -487,11 +375,11 @@ const callChatJsonOnce = async <T>(
     throw new Error(await apiErrorMessage(response));
   }
 
+  const text = await response.text();
   let data: any;
   try {
-    data = await response.json();
+    data = JSON.parse(text);
   } catch {
-    const text = await response.clone().text();
     data = parseSseResponse(text);
   }
   recordUsageFromResponse(data?.usage);
@@ -645,13 +533,21 @@ const callChatText = async (
       }
     }
     disarmIdleTimer();
+    if (idleAborted && fullText.length < STREAM_FALLBACK_MIN_CHARS) {
+      emitLog({
+        level: 'warn',
+        stage: 'voices',
+        message: '流式响应空闲超时，自动回退到非流式重试。',
+      });
+      return callChatText(messages, maxTokens);
+    }
     return fullText;
   } catch (error) {
     disarmIdleTimer();
     // Outer cancel / voice skip — propagate the abort instead of trying to
     // fall back, otherwise we'd just hammer a fresh fetch that immediately
     // rejects with the same AbortError.
-    if (streamSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+    if (streamSignal?.aborted) {
       throw error instanceof Error ? error : new DOMException('aborted', 'AbortError');
     }
     // If the stream broke early without producing meaningful content, fall back to a
@@ -1041,6 +937,61 @@ voicePlans 选择 2-5 个，必须足够贴题。不要生成 routeMap.nextQuest
   };
 };
 
+export const generateThoughtExperimentSceneImage = async (
+  topic: string,
+  outline: Pick<AnalysisOutline, 'philosophical_title' | 'modeLabel' | 'thoughtExperiment'>,
+  variant: 'scene' | 'pressure' = 'scene',
+): Promise<ThoughtExperimentImage | null> => {
+  if (!outline.thoughtExperiment) return null;
+  const cfg = getActiveConfig();
+  const isPressure = variant === 'pressure';
+  const prompt = [
+    'Create a cinematic philosophical scene image for a Chinese philosophy analysis. No text, no subtitles, no poster typography.',
+    isPressure
+      ? 'Style: minimalist pale line art, airy off-white background, thin ink lines, quiet museum sketch, restrained symbolic objects, lots of negative space.'
+      : 'Style: museum installation, dramatic but restrained lighting, realistic objects, contemplative atmosphere, high-detail editorial composition.',
+    `User question: ${topic}`,
+    `Big question: ${outline.philosophical_title}`,
+    `Analytical mode: ${outline.modeLabel}`,
+    `Scene: ${outline.thoughtExperiment.poeticVersion || outline.thoughtExperiment.unsettlingVersion}`,
+    `Core challenge: ${outline.thoughtExperiment.coreChallenge}`,
+    `Stakes: ${outline.thoughtExperiment.stakes}`,
+    isPressure
+      ? `Composition: ${cfg.avatarAspectHint}, small companion image for the lower-right core pressure panel, simple line drawing of the philosophical cost and contradiction rather than the main scene, pale background, no readable words, no UI, no logos.`
+      : `Composition: ${cfg.avatarAspectHint}, wide scene vignette, one central situation with symbolic objects, no readable words, no UI, no logos.`,
+    'Avoid: portrait headshot, book cover, infographic, text, calligraphy, speech bubbles, low-detail generic fantasy art, dark heavy rendering for pressure variant.',
+  ].join('\n');
+
+  return withStageCache<ThoughtExperimentImage>(
+    'avatar',
+    {
+      kind: isPressure ? 'thought-experiment-pressure' : 'thought-experiment-scene',
+      prompt,
+      model: cfg.avatarImageModel,
+      size: cfg.avatarImageSize,
+      aspect: cfg.avatarAspectHint,
+    },
+    async () => {
+      const imageUrl = await callAvatarImage(prompt);
+      return {
+        imageUrl,
+        prompt,
+        model: cfg.avatarImageModel,
+        alt: isPressure ? `${outline.philosophical_title} 的核心挑战场景图` : `${outline.philosophical_title} 的思想实验场景图`,
+        generatedAt: new Date().toISOString(),
+        status: 'completed',
+      };
+    },
+    {
+      onHit: () => emitLog({
+        level: 'detail',
+        stage: 'avatar',
+        message: isPressure ? '核心挑战配图命中阶段缓存：复用上次图像。' : '思想实验场景图命中阶段缓存：复用上次图像。',
+      }),
+    },
+  );
+};
+
 const generateVoiceEssay = async (
   topic: string,
   outline: AnalysisOutline,
@@ -1048,7 +999,7 @@ const generateVoiceEssay = async (
   onDelta?: (delta: string, fullText: string) => void,
   onStep?: (message: string) => void,
 ): Promise<ThoughtVoice> => {
-  onStep?.(`${voicePlan.name} 正在并行生成正文与思想头像...`);
+  onStep?.(`voice pipeline started · text stream + avatar image jobs launched in parallel.`);
   const avatarPromise = withStage(
     'avatar',
     () => generateThoughtVoiceAvatar(topic, outline, voicePlan),
@@ -1133,7 +1084,7 @@ const generateVoiceEssay = async (
       },
     ], voiceMaxTokens, onDelta);
 
-    onStep?.(`${voicePlan.name} 正在提炼摘要与可被批评处...`);
+    onStep?.(`POST /chat/completions · summary extraction request sent.`);
     summary = await callChatJson<{ summaryForSynthesis: string; quote?: string; challenges?: string[] }>([
       { role: 'system', content: '你是哲学分析编辑。请把长文压缩成供最终综合判断使用的 JSON。只输出 JSON。' },
       {
@@ -1150,7 +1101,7 @@ const generateVoiceEssay = async (
     void putStageEntry('voice', voiceCacheKey, { argument, summary });
   }
 
-  onStep?.(`${voicePlan.name} 正在等待并行头像完成...`);
+    onStep?.(`waiting on avatar job result for ${voicePlan.name}...`);
   const avatar = await avatarPromise;
 
   return {
@@ -1759,6 +1710,7 @@ export const analyzeTopic = async (
           status: 'skipped',
         };
         callbacks.onVoiceComplete?.(skipped);
+        completedVoices.push(skipped);
         emitLog({ level: 'warn', stage: 'voices', voiceId, voiceName: removed.name, message: `${removed.name} 已被用户跳过（未启动）。` });
         return;
       }
@@ -1775,6 +1727,7 @@ export const analyzeTopic = async (
           status: 'skipped',
         };
         callbacks.onVoiceComplete?.(skipped);
+        completedVoices.push(skipped);
         emitLog({ level: 'warn', stage: ctx.stage, voiceId, voiceName: removed.name, message: `${removed.name} 已被用户跳过（尚未进入声音阶段）。` });
       }
     },
@@ -1820,7 +1773,7 @@ export const analyzeTopic = async (
   callbacks.onControl?.(handle);
 
   try {
-    emitLog({ level: 'info', stage: 'outline', message: continuationContext ? '正在沿着上一份分析继续展开思想地图...' : '正在把问题整理成一张思想地图...' });
+    emitLog({ level: 'info', stage: 'outline', message: continuationContext ? 'POST /chat/completions · continuation outline request sent, waiting for JSON payload...' : 'POST /chat/completions · outline request sent, waiting for JSON payload...' });
     report({
       stage: 'outline',
       totalVoices: 0,
@@ -1838,6 +1791,24 @@ export const analyzeTopic = async (
     emitLog({ level: 'info', stage: 'outline', message: `问题图谱已成形 · 分析路径：${outline.modeLabel}（计划 ${outline.voicePlans.length} 位思想声音）。` });
 
     let result = createPartialResult(outline);
+    const sceneImagePromise = outline.thoughtExperiment
+      ? withStage('avatar', () => Promise.all([
+        generateThoughtExperimentSceneImage(userTopic, outline, 'scene'),
+        generateThoughtExperimentSceneImage(userTopic, outline, 'pressure'),
+      ]))
+        .then(([sceneImage, pressureImage]) => {
+          const images = { sceneImage: sceneImage || undefined, pressureImage: pressureImage || undefined };
+          if (sceneImage || pressureImage) callbacks.onThoughtExperimentImage?.(images);
+          if (sceneImage) emitLog({ level: 'info', stage: 'avatar', message: '思想实验场景图已生成，将随结果展示。' });
+          if (pressureImage) emitLog({ level: 'info', stage: 'avatar', message: '核心挑战配图已生成，将填充右侧留白。' });
+          return images;
+        })
+        .catch((error) => {
+          console.warn('[sophia] 思想实验配图生成失败', error);
+          emitLog({ level: 'warn', stage: 'avatar', message: '思想实验配图生成失败，文本分析不受影响。' });
+          return null;
+        })
+      : Promise.resolve(null);
     ctx.stage = 'route';
     report({
       stage: 'route',
@@ -1846,7 +1817,7 @@ export const analyzeTopic = async (
       completedVoices: 0,
       messages: [`已形成分析路径：${outline.modeLabel}`, '正在补全论证路线图...'],
     });
-    emitLog({ level: 'info', stage: 'route', message: '正在补全论证路线图...' });
+    emitLog({ level: 'info', stage: 'route', message: `POST /chat/completions · route expansion request sent for ${outline.routeMap.length} base nodes...` });
 
     const stopRouteHeartbeat = startHeartbeat('route', '正在等待论证路线图返回');
     let routeMap;
@@ -1857,7 +1828,7 @@ export const analyzeTopic = async (
     }
     result = { ...result, routeMap };
     callbacks.onRouteMap?.(routeMap);
-    emitLog({ level: 'info', stage: 'route', message: `已生成 ${routeMap.length} 个路线节点。` });
+    emitLog({ level: 'info', stage: 'route', message: `routeMap normalized · ${routeMap.length} nodes ready for UI and synthesis context.` });
 
     // Voices stage. Seed the queue with outline.voicePlans, then launch a
     // bounded worker pool. Workers wait on a wakeup promise when the queue
@@ -1882,13 +1853,13 @@ export const analyzeTopic = async (
       completedVoices: 0,
       messages: [`正在生成 ${plannedVoiceTotal} 个长篇思想声音...`],
     });
-    emitLog({ level: 'info', stage: 'voices', message: `准备并发生成 ${plannedVoiceTotal} 个思想声音（并发数 ${getActiveConfig().options.voiceConcurrency}）。` });
+    emitLog({ level: 'info', stage: 'voices', message: `voice worker pool started · queued=${plannedVoiceTotal}, concurrency=${getActiveConfig().options.voiceConcurrency}, avatarConcurrency=${getActiveConfig().options.avatarConcurrency}.` });
 
     const processOneVoice = async (voicePlan: AnalysisOutline['voicePlans'][number]) => {
       const voiceCtrl = new AbortController();
       inFlightVoices.set(voicePlan.id, voiceCtrl);
       callbacks.onVoiceStart?.(voicePlan.id, voicePlan.name);
-      emitLog({ level: 'info', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 启动。` });
+      emitLog({ level: 'info', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `worker picked voice · id=${voicePlan.id}, queueRemaining=${voiceQueue.length}.` });
       report({
         stage: 'voices',
         modeLabel: outline.modeLabel,
@@ -1930,7 +1901,7 @@ export const analyzeTopic = async (
           const now = Date.now();
           if (now - lastStreamLogTs >= 3000) {
             lastStreamLogTs = now;
-            emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 正文流式输出：${fullText.length} 字。` });
+            emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `stream chunk received · chars=${fullText.length}, delta=${delta.length}.` });
           }
           report({
             stage: 'voices',
@@ -1949,7 +1920,7 @@ export const analyzeTopic = async (
           stage: 'voices',
           voiceId: voicePlan.id,
           voiceName: voicePlan.name,
-          message: `${voicePlan.name} 已完成（${voice.argument.length} 字）。${voice.avatar ? '' : '思想头像未生成，使用占位。'}`,
+          message: `voice complete · chars=${voice.argument.length}, avatar=${voice.avatar ? 'ready' : 'fallback'}, completed=${completedVoices.length}/${plannedVoiceTotal}.`,
         });
         report({
           stage: 'voices',
@@ -1975,6 +1946,7 @@ export const analyzeTopic = async (
             status: 'skipped',
           };
           callbacks.onVoiceComplete?.(skipped);
+          completedVoices.push(skipped);
           emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 已被用户跳过。` });
           return;
         }
@@ -1986,6 +1958,7 @@ export const analyzeTopic = async (
           error: message,
         };
         callbacks.onVoiceComplete?.(failed);
+        completedVoices.push(failed);
         emitLog({ level: 'error', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 失败：${message}` });
       } finally {
         inFlightVoices.delete(voicePlan.id);
@@ -2055,7 +2028,7 @@ export const analyzeTopic = async (
       completedVoices: completedVoices.length,
       messages: ['正在生成分歧、关键词和综合判断...'],
     });
-    emitLog({ level: 'info', stage: 'synthesis', message: `所有思想声音已收束（${completedVoices.length}/${plannedVoiceTotal} 完成），正在生成分歧、关键词与综合判断...` });
+    emitLog({ level: 'info', stage: 'synthesis', message: `POST /chat/completions · synthesis request sent with ${completedVoices.length} voice summaries...` });
     const stopSynthesisHeartbeat = startHeartbeat('synthesis', '正在等待综合判断返回');
     let synthesis;
     try {
@@ -2064,9 +2037,10 @@ export const analyzeTopic = async (
       stopSynthesisHeartbeat();
     }
     callbacks.onSynthesis?.(synthesis);
-    emitLog({ level: 'info', stage: 'synthesis', message: `综合判断已完成（${synthesis.tensions.length} 条分歧 / ${synthesis.keywords.length} 个关键词 / ${synthesis.followUps.length} 条延伸追问）。` });
+    emitLog({ level: 'info', stage: 'synthesis', message: `synthesis JSON normalized · tensions=${synthesis.tensions.length}, keywords=${synthesis.keywords.length}, followUps=${synthesis.followUps.length}.` });
 
     const totalTokens = tokenUsage.reduce((sum, entry) => sum + entry.totalTokens, 0);
+    const thoughtExperimentImages = await sceneImagePromise;
     // Merge: any voice in completedVoices that isn't in result.voices' placeholders
     // (e.g., user-inserted) gets appended at the end.
     const placeholderIds = new Set(result.voices.map((v) => v.id));
@@ -2081,6 +2055,9 @@ export const analyzeTopic = async (
       keywords: normalizeKeywords(synthesis.keywords),
       followUps: normalizeFollowUps(synthesis.followUps),
       conclusion: normalizeConclusion(synthesis.conclusion),
+      thoughtExperiment: result.thoughtExperiment && thoughtExperimentImages
+        ? { ...result.thoughtExperiment, ...thoughtExperimentImages }
+        : result.thoughtExperiment,
       metadata: { tokenUsage, totalTokens },
     };
 
@@ -2433,6 +2410,7 @@ export const chatWithVoice = async (
   history: Message[],
   userMessage: string,
   onDelta?: (delta: string, fullText: string) => void,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const voice = result.voices.find((v) => v.id === voiceId);
   if (!voice) throw new Error('找不到这位思想声音。');
@@ -2442,6 +2420,7 @@ export const chatWithVoice = async (
     voiceId: voice.id,
     voiceName: voice.name,
     onTokenUsage: (usage) => recordUsageStandalone(usage),
+    abortSignal: signal,
   });
   try {
     const trimmedHistory = history.slice(-20).map<ChatMessage>((m) => ({

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, MinusCircle, Pause, Sparkles, X, SkipForward, Plus, ChevronDown, Hammer } from 'lucide-react';
 import { AnalysisResult, GenerationLogEntry, GenerationProgress, ProgramMode, ThoughtVoice } from '../types';
 import { STAGE_LABEL, STAGE_ORDER, getModePresentation, ModePresentation } from '../constants';
+import { estimateGenerationProgress, formatElapsedTime } from '../utils/generationProgress';
 import GenerationLogPanel from './GenerationLogPanel';
 import RubbingGame from './RubbingGame';
 
@@ -27,30 +28,6 @@ interface RoundtableSceneProps {
   onSkipVoice?: (voiceId: string) => void;
   onInsertVoice?: (prompt: string) => void;
 }
-
-const formatElapsed = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
-};
-
-/**
- * Match the same percentage curve as ReasoningDisplay so users who toggle
- * between layouts get a consistent reading.
- */
-const estimatePercent = (stage: GenerationProgress['stage'], total: number, completed: number, streamedChars?: number) => {
-  if (stage === 'done') return 100;
-  if (stage === 'error') return 0;
-  if (stage === 'outline') return 12;
-  if (stage === 'route') return 30;
-  if (stage === 'synthesis') return 86;
-  if (stage !== 'voices') return 0;
-  const completedVoicePercent = total > 0 ? (completed / total) * 38 : 0;
-  const currentVoiceBoost = total > 0 && completed < total && streamedChars
-    ? Math.min(8, Math.floor(streamedChars / 450))
-    : 0;
-  return Math.min(82, Math.round(42 + completedVoicePercent + currentVoiceBoost));
-};
 
 interface SeatVisual {
   voice: ThoughtVoice;
@@ -240,8 +217,16 @@ const RoundtableScene: React.FC<RoundtableSceneProps> = ({ isAnalyzing, isFinish
   const total = progress?.totalVoices || result?.voices.length || 0;
   const completed = progress?.completedVoices || result?.voices.filter((v) => v.status === 'completed').length || 0;
   const isDone = isFinished || stage === 'done';
-  const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
-  const percent = isDone ? 100 : estimatePercent(stage, total, completed, progress?.streamedChars);
+  const estimate = estimateGenerationProgress({
+    progress,
+    entries: log ?? [],
+    startedAt,
+    now,
+    result,
+    isFinished: isDone,
+  });
+  const elapsed = Math.round(estimate.elapsedMs / 1000);
+  const percent = estimate.percent;
 
   // Mode-aware copy. Falls back to neutral "声音/核心议题" wording when the
   // outline hasn't landed yet (no result.mode), so the surface never says
@@ -272,9 +257,10 @@ const RoundtableScene: React.FC<RoundtableSceneProps> = ({ isAnalyzing, isFinish
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-widest text-museum-500">
-            <span>{formatElapsed(elapsed)}</span>
+            <span>{formatElapsedTime(elapsed)}</span>
             {total > 0 && <span>{completed}/{total} {presentation.itemUnit}就位</span>}
             <span>{isDone ? '100%' : `约 ${percent}%`}</span>
+            {!isDone && <span>{estimate.etaLabel}</span>}
             {isAnalyzing && !isDone && onCancel && (
               <button
                 type="button"

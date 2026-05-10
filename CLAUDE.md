@@ -8,20 +8,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run dev` — start the Vite dev server on `127.0.0.1:7878` with a strict port.
 - `npm run build` — build the app into `dist/`, then copy `dist/index.html` to `dist/404.html` for GitHub Pages SPA fallback routing.
 - `npm run preview` — preview the production build on `127.0.0.1:7878` with the same local API proxy as dev.
+- `npm test` — run the Node test suite through `tsx --test` for pure utilities and quality gates.
 
-There are no lint or test scripts configured in `package.json`, and no project test runner config is present. A single-test command is not applicable until a test runner is added; use `npm run build` as the available local validation command.
+Use `npm test` for fast utility validation and `npm run build` as the full local validation command before handing off changes.
 
 ## High-level architecture
 
 This is a Vite + React 18 single-page app for generating and reading Chinese philosophy analyses. `index.tsx` mounts `App.tsx`; `index.html` provides the Tailwind CDN theme, Google fonts, import map, root element, and global stylesheet link.
 
-`App.tsx` is the main state and routing coordinator. It implements client-side routing with `window.history` for `/`, `/history`, `/history/sample`, `/manifesto`, and `/history/:id`; manages active generation runs; persists generated history in `localStorage`; loads the preloaded sample from `data/preloadedHistory.ts`; and passes generated results into the presentation components.
+`App.tsx` is the main state and routing coordinator. It delegates client-side routing helpers to `utils/routing.ts`, active generation lifecycle to `hooks/useAnalysisRun.ts`, history/preset/resume state to `hooks/useHistoryLibrary.ts`, and presentation shell concerns to `components/AppShell.tsx` plus page components.
 
-`services/sophiaService.ts` is the AI orchestration layer. It calls OpenAI-compatible `/chat/completions` and `/images/generations` endpoints, normalizes model JSON into the shared shapes in `types.ts`, streams voice essays back through callbacks, generates voice avatars, and runs the analysis pipeline in stages: outline, route details, concurrent thought voices, then synthesis.
+`services/sophiaService.ts` is the AI orchestration layer. It calls OpenAI-compatible `/chat/completions` and `/images/generations` through `services/apiClient.ts`, normalizes model JSON into the shared shapes in `types.ts`, streams voice essays back through callbacks, generates voice avatars, and runs the analysis pipeline in stages: outline, route details, concurrent thought voices, then synthesis.
 
-`types.ts` defines the shared data model for analysis results, outlines, route nodes, voices, progress updates, active runs, history entries, and continuation context. Keep service outputs and component props aligned with these types when changing the generation schema.
+`types.ts` defines the shared data model for analysis results, outlines, route nodes, voices, progress updates, active runs, history entries, run snapshots, and continuation context. Keep service outputs and component props aligned with these types when changing the generation schema.
 
-The main UI components are organized by page or result section: `components/Arena.tsx` renders a completed or streaming analysis result; `ReasoningDisplay.tsx` shows generation progress; `ThoughtVoiceCard.tsx` renders each long-form voice and avatar fallback; `HistoryPage.tsx` renders saved runs; `ManifestoPage.tsx` renders the manifesto page; `ActiveRunBanner.tsx` surfaces in-progress runs; and `DynamicBackground.tsx` provides the React Three Fiber background.
+The main UI components are organized by shell, page, or result section: `components/Arena.tsx` renders result-level actions and the Continuation Studio while `components/ArenaSections.tsx` contains the stable result sections; `ReasoningDisplay.tsx` and `GenerationLogPanel.tsx` show generation progress and logs; `ThoughtVoiceCard.tsx` renders each long-form voice and avatar fallback; `HistoryPage.tsx`, `ManifestoPage.tsx`, `SettingsPage.tsx`, `HomePage.tsx`, and `ResultPage.tsx` render top-level pages. `DynamicBackground.tsx` lazy-loads the React Three Fiber `BackgroundScene.tsx` after idle time.
 
 Styling is mostly Tailwind utility classes backed by the custom `museum` palette and font families declared in `index.html`. `index.css` only contains global animation, scrolling, scrollbar, and selection styles.
 
@@ -29,7 +30,7 @@ Styling is mostly Tailwind utility classes backed by the custom `museum` palette
 
 When asked to add a new analytical mode, voice kind, or preset model, the canonical entry points are:
 
-- **New analysis mode** (e.g. `dialectic_court`): add to `ProgramMode` in `types.ts`; register the label and the prompt rules in `services/prompts.ts` (`MODE_LABELS` and the path list inside `outlineSystemPrompt`); pick an icon in `components/Arena.tsx` `modeIcon`. If the mode needs a specialized rendered section (like `diagnosisFrame` / `thoughtExperiment` / `seminarMatrix`), add the field to `types.ts` and a corresponding section in `Arena.tsx`.
+- **New analysis mode** (e.g. `dialectic_court`): add to `ProgramMode` in `types.ts`; register the label and the prompt rules in `services/prompts.ts` (`MODE_LABELS` and the path list inside `outlineSystemPrompt`); pick an icon in `components/ArenaSections.tsx` `modeIcon`. If the mode needs a specialized rendered section (like `diagnosisFrame` / `thoughtExperiment` / `seminarMatrix`), add the field to `types.ts` and a corresponding section in `ArenaSections.tsx`.
 - **New voice kind** (e.g. `'fictional'`): extend `VoiceKind` in `types.ts`; update `kindLabel` and `VOICE_KIND_SYMBOL` in `components/ThoughtVoiceCard.tsx`; update `VOICE_KIND_AVATAR_SUBJECT` in `services/sophiaService.ts` so avatar prompts know what to draw.
 - **New preset model** (e.g. `claude`): inject env in `vite.config.ts` `define` and `.github/workflows/deploy.yml` build env; declare the type in `vite-env.d.ts`; add a row to `services/modelPresets.ts`. Document the new GitHub Variable in `DEPLOY.md` and `README.md`.
 - **Editing a built-in prompt**: edit `services/prompts.ts`. The Settings page can override prompts at runtime via `sophia.settings.v1.promptOverrides`, but committed defaults live here.

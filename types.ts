@@ -61,11 +61,22 @@ export interface DiagnosisFrame {
   }>;
 }
 
+export interface ThoughtExperimentImage {
+  imageUrl: string;
+  prompt: string;
+  model: string;
+  alt: string;
+  generatedAt?: string;
+  status?: 'completed' | 'failed';
+}
+
 export interface ThoughtExperimentFrame {
   poeticVersion?: string;
   unsettlingVersion: string;
   coreChallenge: string;
   stakes: string;
+  sceneImage?: ThoughtExperimentImage;
+  pressureImage?: ThoughtExperimentImage;
   responseMap: Array<{
     voiceId: string;
     route: string;
@@ -273,6 +284,7 @@ export interface AnalyzeCallbacks {
   onVoiceStep?: (voiceId: string, voiceName: string, message: string) => void;
   onVoiceComplete?: (voice: ThoughtVoice) => void;
   onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
+  onThoughtExperimentImage?: (images: Partial<Pick<ThoughtExperimentFrame, 'sceneImage' | 'pressureImage'>>) => void;
   onError?: (message: string) => void;
   /** Each emit lands as a row in the GenerationLogPanel. */
   onLog?: (entry: GenerationLogEntry) => void;

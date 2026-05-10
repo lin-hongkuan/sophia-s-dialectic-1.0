@@ -68,7 +68,9 @@ html {
     scroll-behavior: auto !important;
   }
 
-  .animate-fade-in {
+  .animate-fade-in,
+  .animate-chip-in,
+  .animate-section-in {
     animation: none !important;
   }
 }

@@ -66,12 +66,31 @@ const persistExpanded = (expanded: boolean) => {
   }
 };
 
+const isWaitUpdate = (entry: GenerationLogEntry): boolean => (
+  entry.level === 'detail' && (/模型仍在/.test(entry.message) || entry.message.startsWith('[keepalive]'))
+);
+
+const compactEntries = (entries: GenerationLogEntry[]): GenerationLogEntry[] => {
+  const latestWaitByStage = new Map<string, GenerationLogEntry>();
+  const compacted: GenerationLogEntry[] = [];
+  for (const entry of entries) {
+    if (!isWaitUpdate(entry)) {
+      compacted.push(entry);
+      continue;
+    }
+    latestWaitByStage.set(String(entry.stage), entry);
+  }
+  for (const entry of latestWaitByStage.values()) compacted.push(entry);
+  return compacted.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
+};
+
 const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnalyzing }) => {
   const [expanded, setExpanded] = useState<boolean>(loadExpanded);
   const [stickToBottom, setStickToBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const totalCount = entries.length;
+  const visibleEntries = useMemo(() => compactEntries(entries), [entries]);
   const lastTokenLine = useMemo(() => {
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i];
@@ -119,7 +138,7 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
           <Activity className="h-3 w-3" />
           生成日志
           <span className="rounded-full border border-museum-200 bg-museum-50/80 px-2 py-0.5 text-[9px] tracking-[0.18em] text-museum-600">
-            {totalCount} 条{isAnalyzing ? ' · 实时' : ''}
+            {totalCount} 条{visibleEntries.length < totalCount ? ` · 显示 ${visibleEntries.length} 条` : ''}{isAnalyzing ? ' · 实时' : ''}
           </span>
         </span>
         <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-museum-500">
@@ -137,11 +156,11 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
             aria-live={isAnalyzing ? 'polite' : 'off'}
             aria-relevant="additions text"
           >
-            {entries.length === 0 ? (
+            {visibleEntries.length === 0 ? (
               <p className="text-museum-400">尚未产生日志条目。生成开始后这里会持续滚动。</p>
             ) : (
               <ul className="space-y-1.5">
-                {entries.map((entry) => (
+                {visibleEntries.map((entry) => (
                   <li key={entry.id} className={`flex flex-wrap items-start gap-x-2 gap-y-0.5 ${levelClass(entry.level)}`}>
                     <span className="shrink-0 text-museum-400">[{formatTime(entry.ts)}]</span>
                     <span className={`shrink-0 rounded-full border px-1.5 py-[1px] text-[9px] tracking-widest ${stageTagClass(entry.level)}`}>
@@ -176,7 +195,7 @@ const GenerationLogPanel: React.FC<GenerationLogPanelProps> = ({ entries, isAnal
           )}
 
             <p className="mt-2 text-[10px] text-museum-400 font-mono tracking-widest">
-              仅保留最近 {totalCount} 条生成日志。
+              显示最近 {visibleEntries.length} 条关键日志{visibleEntries.length < totalCount ? `，已折叠 ${totalCount - visibleEntries.length} 条重复等待状态` : ''}。
             </p>
           {lastTokenLine && (
             <p className="mt-2 text-[10px] text-museum-400 font-mono tracking-widest">

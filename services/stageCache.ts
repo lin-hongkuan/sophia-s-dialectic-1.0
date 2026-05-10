@@ -17,8 +17,7 @@
  * Versioning: bump CACHE_VERSION when the prompt schema changes
  * incompatibly (e.g., synthesis schema gained the 7-field keyword shape in
  * Phase 2.1 — anything cached before that would have stale 3-field data).
- * The version is mixed into every key so old entries are simply orphaned and
- * pruned by ageOff over time.
+ * The version is mixed into every key so old entries are simply orphaned.
  */
 
 import { createKeyValueStore } from './indexedDbStore';
@@ -101,12 +100,20 @@ export const buildStageKey = (kind: StageKind, fingerprint: object): string => {
  * The TTL check happens at read time so we don't have to pre-emptively
  * iterate the store on every load.
  */
+export const isStageEntryUsable = <T>(kind: StageKind, entry: StageCacheEntry<T> | null | undefined, nowMs = Date.now()): entry is StageCacheEntry<T> => {
+  if (!entry) return false;
+  if (entry.version !== CACHE_VERSION) return false;
+  const writtenAtMs = Date.parse(entry.writtenAt);
+  if (!Number.isFinite(writtenAtMs)) return false;
+  return nowMs - writtenAtMs <= STAGE_TTL_MS[kind];
+};
+
 export const getStageEntry = async <T>(kind: StageKind, key: string): Promise<T | null> => {
   const entry = await store.get(key);
-  if (!entry) return null;
-  if (entry.version !== CACHE_VERSION) return null;
-  const age = Date.now() - Date.parse(entry.writtenAt);
-  if (Number.isFinite(age) && age > STAGE_TTL_MS[kind]) return null;
+  if (!isStageEntryUsable(kind, entry)) {
+    if (entry) void store.del(key);
+    return null;
+  }
   return entry.value as T;
 };
 
@@ -155,6 +162,10 @@ export const clearStageCache = async (): Promise<void> => {
  * can show "缓存了 N 条阶段产物" without having to load them all.
  */
 export const countStageEntries = async (): Promise<number> => {
-  const keys = await store.listKeys();
-  return keys.length;
+  const entries = await store.listEntries();
+  const staleKeys = entries
+    .filter(({ key, value }) => !isStageEntryUsable(key.split(':', 1)[0] as StageKind, value))
+    .map(({ key }) => key);
+  if (staleKeys.length > 0) void store.del(staleKeys);
+  return entries.length - staleKeys.length;
 };

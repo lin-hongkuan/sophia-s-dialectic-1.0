@@ -70,18 +70,27 @@ export const pruneStaleRunSnapshots = async (ttlMs = RUN_SNAPSHOT_TTL_MS): Promi
   await store.del(stale.map(({ key }) => key));
 };
 
+const snapshotUpdatedAtMs = (snap: RunSnapshot): number => {
+  const ts = Date.parse(snap.updatedAt);
+  return Number.isFinite(ts) ? ts : Number.NEGATIVE_INFINITY;
+};
+
+export const isResumableRunSnapshot = (snap: RunSnapshot): boolean => {
+  if (snap.status === 'starting' || snap.status === 'running') return snap.lastCompletedStage !== 'synthesis';
+  return snap.status === 'completed' && snap.lastCompletedStage === 'synthesis' && !!snap.partialResult;
+};
+
+export const compareRunSnapshotsByUpdatedAtDesc = (a: RunSnapshot, b: RunSnapshot): number =>
+  snapshotUpdatedAtMs(b) - snapshotUpdatedAtMs(a);
+
 /**
- * Find the most recent snapshot whose status is still "in flight" — meaning
- * the user could plausibly want to resume it. Completed / cancelled / error
- * snapshots are skipped (they should have been deleted on the way out, but
- * we double-check here in case a bug or hard crash left them behind).
+ * Find the most recent snapshot whose status is recoverable — either still in
+ * flight, or completed after synthesis but left behind before history cleanup.
  */
 export const findMostRecentResumable = async (): Promise<RunSnapshot | null> => {
   const all = await listRunSnapshots();
-  const candidates = all.filter((snap) =>
-    (snap.status === 'starting' || snap.status === 'running') && snap.lastCompletedStage !== 'synthesis'
-  );
+  const candidates = all.filter(isResumableRunSnapshot);
   if (candidates.length === 0) return null;
-  candidates.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  candidates.sort(compareRunSnapshotsByUpdatedAtDesc);
   return candidates[0];
 };

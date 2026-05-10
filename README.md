@@ -129,8 +129,9 @@ npm run dev
 | `npm run dev` | Vite dev server，固定 `127.0.0.1:7878`，启用本地 API 代理。 |
 | `npm run build` | 构建到 `dist/`，并把 `dist/index.html` 复制为 `dist/404.html`（GH Pages SPA 回退）。 |
 | `npm run preview` | 在 `127.0.0.1:7878` 预览生产构建，仍走本地 API 代理。 |
+| `npm test` | 运行 `tsx --test` 的最小质量门，覆盖 routing、输入校验、生成日志等纯函数。 |
 
-仓库目前没有 lint / 测试脚本；`npm run build` 是唯一的本地校验入口（隐含 TypeScript 检查）。
+本地交付前建议至少跑 `npm test` + `npm run build`；涉及 UI 的改动还应启动 `npm run dev` 或 `npm run preview` 做浏览器手验。
 
 ---
 

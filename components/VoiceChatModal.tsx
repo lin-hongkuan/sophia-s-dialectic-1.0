@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, Send, Trash2, X } from 'lucide-react';
 import { AnalysisResult, Message, ThoughtVoice } from '../types';
-import { chatWithVoice } from '../services/sophiaService';
-import { clearVoiceChat, loadVoiceChat, saveVoiceChat } from '../services/voiceChatStore';
+import { useVoiceChatSession } from '../hooks/useVoiceChatSession';
 
 interface VoiceChatModalProps {
   open: boolean;
@@ -56,23 +55,22 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ role, content, voiceName,
 };
 
 const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, onClose }) => {
-  const [messages, setMessages] = useState<Message[]>(() =>
-    open ? loadVoiceChat(result.id, voice.id) : [],
-  );
-  const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingText, setStreamingText] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const {
+    messages,
+    input,
+    setInput,
+    isStreaming,
+    streamingText,
+    error,
+    sendMessage,
+    clearMessages,
+  } = useVoiceChatSession({ open, voice, result });
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    setMessages(loadVoiceChat(result.id, voice.id));
-    setStreamingText('');
-    setError(null);
-    setInput('');
     setClearConfirmOpen(false);
   }, [open, result.id, voice.id]);
 
@@ -103,38 +101,10 @@ const VoiceChatModal: React.FC<VoiceChatModalProps> = ({ open, voice, result, on
     }
   }, [messages, streamingText]);
 
-  const handleSend = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
-    const userMsg: Message = { role: 'user', content: trimmed };
-    const next = [...messages, userMsg];
-    setMessages(next);
-    saveVoiceChat(result.id, voice.id, next);
-    setInput('');
-    setStreamingText('');
-    setError(null);
-    setIsStreaming(true);
-    try {
-      const reply = await chatWithVoice(result, voice.id, messages, trimmed, (_d, full) =>
-        setStreamingText(full),
-      );
-      const assistantMsg: Message = { role: 'assistant', content: reply };
-      const finalMsgs = [...next, assistantMsg];
-      setMessages(finalMsgs);
-      saveVoiceChat(result.id, voice.id, finalMsgs);
-      setStreamingText('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '回应失败');
-    } finally {
-      setIsStreaming(false);
-    }
-  };
+  const handleSend = sendMessage;
 
   const handleClear = () => {
-    clearVoiceChat(result.id, voice.id);
-    setMessages([]);
-    setStreamingText('');
-    setError(null);
+    clearMessages();
     setClearConfirmOpen(false);
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   };

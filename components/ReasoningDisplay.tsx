@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, BrainCircuit, Search, BookOpen, Scale, CheckCircle2, Circle, ChevronDown, Hammer } from 'lucide-react';
 import { GenerationLogEntry, GenerationProgress } from '../types';
 import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import { estimateGenerationProgress, formatElapsedTime } from '../utils/generationProgress';
 import GenerationLogPanel from './GenerationLogPanel';
 import RubbingGame from './RubbingGame';
 
@@ -20,31 +21,10 @@ const stageSteps: Array<{ key: GenerationProgress['stage']; title: string; descr
   { key: 'synthesis', title: '整理分歧与结论', description: '收束关键词、争论焦点和继续追问。', icon: Scale },
 ];
 
-const formatElapsed = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
-};
-
 const formatStageNumber = (stage: string, isDone: boolean) => {
   if (isDone || stage === 'done') return `${stageSteps.length}/${stageSteps.length}`;
   const index = stageSteps.findIndex((step) => step.key === stage);
   return index >= 0 ? `${index + 1}/${stageSteps.length}` : '—';
-};
-
-const estimatePercent = (stage: string, total: number, completed: number, streamedChars?: number) => {
-  if (stage === 'done') return 100;
-  if (stage === 'error') return 0;
-  if (stage === 'outline') return 12;
-  if (stage === 'route') return 30;
-  if (stage === 'synthesis') return 86;
-  if (stage !== 'voices') return 0;
-
-  const completedVoicePercent = total > 0 ? (completed / total) * 38 : 0;
-  const currentVoiceBoost = total > 0 && completed < total && streamedChars
-    ? Math.min(8, Math.floor(streamedChars / 450))
-    : 0;
-  return Math.min(82, Math.round(42 + completedVoicePercent + currentVoiceBoost));
 };
 
 const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFinished, progress, log, startedAt: startedAtIso }) => {
@@ -73,10 +53,17 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
   const currentStage = progress?.stage || 'outline';
   const currentIndex = STAGE_ORDER.indexOf(currentStage);
   const isDone = isFinished || currentStage === 'done';
-  const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
+  const estimate = estimateGenerationProgress({
+    progress,
+    entries: log ?? [],
+    startedAt,
+    now,
+    isFinished: isDone,
+  });
+  const elapsed = Math.round(estimate.elapsedMs / 1000);
   const total = progress?.totalVoices || 0;
   const completed = progress?.completedVoices || 0;
-  const percent = isDone ? 100 : estimatePercent(currentStage, total, completed, progress?.streamedChars);
+  const percent = estimate.percent;
   const stageNumber = formatStageNumber(currentStage, isDone);
   const activeStepIndex = stageSteps.findIndex((step) => step.key === currentStage);
   const completedStageCount = isDone ? stageSteps.length : Math.max(0, activeStepIndex);
@@ -116,8 +103,9 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-widest text-museum-500 md:justify-end">
-            <span>{formatElapsed(elapsed)}</span>
+            <span>{formatElapsedTime(elapsed)}</span>
             {total > 0 && <span>{completed}/{total} 个声音完成</span>}
+            {!isDone && <span>{estimate.etaLabel}</span>}
             {typeof progress?.streamedChars === 'number' && <span>当前声音 {progress.streamedChars} 字</span>}
           </div>
         </div>
@@ -146,7 +134,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ isAnalyzing, isFini
           <div>
             <p className="text-[10px] font-mono uppercase tracking-widest text-museum-400">接下来</p>
             <p className="mt-1 font-serif text-lg text-museum-900">{nextStep}</p>
-            <p className="mt-1 text-xs text-museum-500">进度条为阶段估算，会随完成节点更新</p>
+            <p className="mt-1 text-xs text-museum-500">{estimate.confidence === 'low' ? '模型响应波动较大，时间仅供参考' : '根据当前阶段与声音完成速度动态估算'}</p>
           </div>
         </div>
 

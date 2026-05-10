@@ -80,9 +80,19 @@ export const DEFAULT_SETTINGS: SophiaSettings = {
   options: { ...DEFAULT_OPTIONS },
 };
 
+const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const trimOrFallback = (value: unknown, fallback: string) => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed || fallback;
+};
+
+const normalizeBaseUrl = (value: unknown, fallback: string) => trimOrFallback(value, fallback).replace(/\/+$/, '');
+
 const ENV_BASELINE = {
   apiKey: process.env.SOPHIA_API_KEY || '',
-  apiBaseUrl: (process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1').replace(/\/$/, ''),
+  apiBaseUrl: normalizeBaseUrl(process.env.SOPHIA_API_BASE_URL, 'https://api.linhongkuan.com/v1'),
   apiModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
   apiProvider: process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible',
   avatarImageModel: process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite',
@@ -92,8 +102,6 @@ const ENV_BASELINE = {
   presetMimo: process.env.SOPHIA_PRESET_MIMO_MODEL || '',
   presetGrok: process.env.SOPHIA_PRESET_GROK_MODEL || '',
 };
-
-const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
 const cloneSettings = (settings: SophiaSettings): SophiaSettings => ({
   activeProviderId: settings.activeProviderId,
@@ -119,11 +127,11 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
   if (source.customProvider && typeof source.customProvider === 'object') {
     const cp = source.customProvider as Partial<CustomProvider>;
     merged.customProvider = {
-      name: typeof cp.name === 'string' ? cp.name : merged.customProvider.name,
-      baseUrl: typeof cp.baseUrl === 'string' ? cp.baseUrl : merged.customProvider.baseUrl,
-      apiKey: typeof cp.apiKey === 'string' ? cp.apiKey : merged.customProvider.apiKey,
-      textModel: typeof cp.textModel === 'string' ? cp.textModel : merged.customProvider.textModel,
-      imageModel: typeof cp.imageModel === 'string' ? cp.imageModel : merged.customProvider.imageModel,
+      name: trimOrFallback(cp.name, merged.customProvider.name),
+      baseUrl: normalizeBaseUrl(cp.baseUrl, merged.customProvider.baseUrl),
+      apiKey: trimOrFallback(cp.apiKey, merged.customProvider.apiKey),
+      textModel: trimOrFallback(cp.textModel, merged.customProvider.textModel),
+      imageModel: trimOrFallback(cp.imageModel, merged.customProvider.imageModel),
     };
   }
 
@@ -253,9 +261,9 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
     const cp = settings.customProvider;
     return {
       apiKey: cp.apiKey || ENV_BASELINE.apiKey,
-      apiBaseUrl: (cp.baseUrl || ENV_BASELINE.apiBaseUrl).replace(/\/$/, ''),
+      apiBaseUrl: normalizeBaseUrl(cp.baseUrl, ENV_BASELINE.apiBaseUrl),
       apiModel: cp.textModel || ENV_BASELINE.apiModel,
-      apiProvider: ENV_BASELINE.apiProvider,
+      apiProvider: cp.name || DEFAULT_CUSTOM_PROVIDER.name,
       avatarImageModel: cp.imageModel || ENV_BASELINE.avatarImageModel,
       avatarImageSize: ENV_BASELINE.avatarImageSize,
       avatarAspectHint: ENV_BASELINE.avatarAspectHint,
@@ -271,11 +279,16 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
     apiBaseUrl: ENV_BASELINE.apiBaseUrl,
     apiModel: presetModel || ENV_BASELINE.apiModel,
     apiProvider: ENV_BASELINE.apiProvider,
-    avatarImageModel: settings.customProvider.imageModel || ENV_BASELINE.avatarImageModel,
+    avatarImageModel: ENV_BASELINE.avatarImageModel,
     avatarImageSize: ENV_BASELINE.avatarImageSize,
     avatarAspectHint: ENV_BASELINE.avatarAspectHint,
     promptOverrides: settings.promptOverrides,
     options: settings.options,
     activeProviderId: settings.activeProviderId,
   };
+};
+
+export const isActiveConfigReady = (): boolean => {
+  const cfg = getActiveConfig();
+  return Boolean(cfg.apiKey && cfg.apiBaseUrl && cfg.apiModel);
 };

@@ -29,6 +29,9 @@ export const isImageStoreAvailable = isIndexedDbAvailable;
 export const buildAvatarKey = (entryId: string, voiceId: string): string =>
   `${entryId}::${voiceId}`;
 
+export const buildSceneImageKey = (entryId: string, variant = 'scene'): string =>
+  `${entryId}::thought-experiment-${variant}`;
+
 export const putAvatarImage = async (key: string, imageUrl: string): Promise<void> => {
   if (!imageUrl) return;
   await store.put(key, imageUrl);
