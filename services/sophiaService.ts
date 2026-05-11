@@ -2153,6 +2153,7 @@ export const resumeAnalysis = async (
 };
 
 export const generateQuestionSuggestions = async (seedTopic = ''): Promise<string[]> => {
+  const trimmedSeedTopic = seedTopic.trim();
   const ctx = pushRunContext({
     stage: 'suggestion',
     onTokenUsage: (usage) => recordUsageStandalone(usage),
@@ -2166,13 +2167,15 @@ export const generateQuestionSuggestions = async (seedTopic = ''): Promise<strin
       {
         role: 'user',
         content: `请生成 5 个适合首页展示的哲学问题。
-${seedTopic ? `用户当前输入或兴趣：${seedTopic}` : '用户没有输入具体兴趣，请覆盖生活焦虑、伦理困境、认识论、社会议题和存在问题。'}
+${trimmedSeedTopic ? `用户当前输入或兴趣：${trimmedSeedTopic}` : '用户没有输入具体兴趣。此时只能生成哲学传统中的有趣“大问题”：存在与死亡、自由意志、意识与自我、知识与怀疑、善与正义、意义与虚无、真实与表象等。不要生成日常焦虑、社会热点、应用伦理、身份议题或自我改善式问题。'}
 
 要求：
 - 每个问题 8-22 个中文字符左右，必须以问号结尾。
+- 空输入时，每个问题都必须是可被哲学史长期讨论的根本问题，像“自由意志存在吗？”、“列车难题到底如何解？”、“知识是从哪里来的？”。
 - 问题要具体、有张力、普通人也愿意点击。
 - 不要重复首页已有问题；如果用户给了当前兴趣，围绕它生成更尖锐的变体。
 - 不要输出解释。
+- 每个问题都要涉及不同方面。
 
 输出 JSON：{"questions":["问题1？","问题2？","问题3？","问题4？","问题5？"]}`,
       },
