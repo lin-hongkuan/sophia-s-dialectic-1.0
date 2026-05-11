@@ -1,7 +1,17 @@
 import type { HistoryEntry } from '../types';
 
-export type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result' | 'concept';
-export type AppRoute = '/' | '/active' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}` | `/concept/${string}/${string}`;
+export type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result' | 'concept' | 'roundtable';
+export type AppRoute =
+  | '/'
+  | '/active'
+  | '/history'
+  | '/history/sample'
+  | '/manifesto'
+  | '/settings'
+  | '/roundtable'
+  | `/history/${string}`
+  | `/concept/${string}/${string}`
+  | `/roundtable/${string}`;
 
 const ROUTES: Record<string, AppRoute> = {
   '/': '/',
@@ -14,12 +24,15 @@ const ROUTES: Record<string, AppRoute> = {
   '/manifesto/': '/manifesto',
   '/settings': '/settings',
   '/settings/': '/settings',
+  '/roundtable': '/roundtable',
+  '/roundtable/': '/roundtable',
 };
 
 export const normalizeRoute = (pathname: string): AppRoute => {
   if (ROUTES[pathname]) return ROUTES[pathname];
   if (/^\/concept\/[^/]+\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
   if (/^\/history\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
+  if (/^\/roundtable\/[^/]+\/?$/.test(pathname)) return pathname.replace(/\/$/, '') as AppRoute;
   return '/';
 };
 
@@ -58,3 +71,17 @@ export const parseConceptRoute = (route: AppRoute): { analysisId: string; keywor
 
 export const conceptRoute = (analysisId: string, keywordId: string): AppRoute =>
   `/concept/${encodeURIComponent(analysisId)}/${encodeURIComponent(keywordId)}` as AppRoute;
+
+/**
+ * Extract the session id from `/roundtable/<sessionId>`. Returns empty string
+ * for the `/roundtable` index or unrecognized inputs, matching `routeHistoryId`.
+ */
+export const routeRoundtableId = (route: AppRoute): string => {
+  if (!route.startsWith('/roundtable/')) return '';
+  const tail = route.slice('/roundtable/'.length);
+  if (!tail) return '';
+  return safeDecodeURIComponent(tail) || '';
+};
+
+export const roundtableSessionRoute = (sessionId: string): AppRoute =>
+  `/roundtable/${encodeURIComponent(sessionId)}` as AppRoute;

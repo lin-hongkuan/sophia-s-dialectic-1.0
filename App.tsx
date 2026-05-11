@@ -10,6 +10,7 @@ import ConceptDetailPage from './components/ConceptDetailPage';
 import AppShell from './components/AppShell';
 import HomePage from './components/HomePage';
 import ResultPage from './components/ResultPage';
+import RoundtablePage from './components/RoundtablePage';
 import { ANNOUNCEMENT } from './data/announcement';
 import { validateUserPrompt } from './utils/inputValidation';
 import { reframeUserTopic, type ReframeCandidate } from './services/topicReframe';
@@ -76,6 +77,7 @@ const App: React.FC = () => {
   } | null>(null);
   const [isReframing, setIsReframing] = useState(false);
   const [conceptTarget, setConceptTarget] = useState<{ analysisId: string; keywordId: string } | null>(null);
+  const [roundtableId, setRoundtableId] = useState<string | null>(null);
   const [apiConfigured, setApiConfigured] = useState(() => BUILD_API_CONFIGURED || isActiveConfigReady());
   const isOffline = useOnlineStatus();
   const { announcementOpen, openAnnouncement, dismissAnnouncement } = useAnnouncement(ANNOUNCEMENT);
@@ -134,6 +136,8 @@ const App: React.FC = () => {
     goHistory,
     goManifesto,
     goSettings,
+    goRoundtable,
+    goRoundtableSession,
     goToConcept,
     goConceptBack,
     findAnalysisResultById,
@@ -147,6 +151,7 @@ const App: React.FC = () => {
     setSelectedSource,
     setSelectedHistoryResult,
     setConceptTarget,
+    setRoundtableId,
     hydratePresetForCurrentRoute,
     hydrateHistoryForCurrentRoute,
     findStoredEntry,
@@ -193,6 +198,7 @@ const App: React.FC = () => {
   const showSettings = view === 'settings';
   const showResult = view === 'result';
   const showConcept = view === 'concept';
+  const showRoundtable = view === 'roundtable';
   const isViewingActiveRun = showResult && selectedSource === 'active';
   const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
   const showAnnouncement = announcementOpen && !reframeState?.open;
@@ -332,6 +338,7 @@ const App: React.FC = () => {
       onHistory={goHistory}
       onManifesto={goManifesto}
       onSettings={goSettings}
+      onRoundtable={goRoundtable}
       onOpenAnnouncement={openAnnouncement}
       onDismissAnnouncement={handleDismissAnnouncement}
       onAnnouncementCta={
@@ -396,6 +403,20 @@ const App: React.FC = () => {
       {showManifesto && <ManifestoPage onBack={goHome} />}
 
       {showSettings && <SettingsPage onBack={goHome} />}
+
+      {showRoundtable && (
+        <RoundtablePage
+          initialSessionId={roundtableId}
+          apiConfigured={apiConfigured}
+          isOffline={isOffline}
+          onBack={goHome}
+          onOpenSession={(sessionId) => goRoundtableSession(sessionId)}
+          onClearSession={() => {
+            setRoundtableId(null);
+            goRoundtable();
+          }}
+        />
+      )}
 
       {showResult && (
         <ResultPage

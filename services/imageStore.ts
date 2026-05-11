@@ -32,6 +32,14 @@ export const buildAvatarKey = (entryId: string, voiceId: string): string =>
 export const buildSceneImageKey = (entryId: string, variant = 'scene'): string =>
   `${entryId}::thought-experiment-${variant}`;
 
+/**
+ * Key layout used by the Roundtable feature. Living in a separate namespace
+ * means an analysis voice id can never collide with a roundtable participant
+ * id even if the application ever reused them.
+ */
+export const buildRoundtableAvatarKey = (sessionId: string, participantId: string): string =>
+  `roundtable::${sessionId}::participant::${participantId}`;
+
 export const putAvatarImage = async (key: string, imageUrl: string): Promise<void> => {
   if (!imageUrl) return;
   await store.put(key, imageUrl);

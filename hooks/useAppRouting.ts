@@ -10,6 +10,8 @@ import {
   parseConceptRoute,
   pushRoute,
   routeHistoryId,
+  routeRoundtableId,
+  roundtableSessionRoute,
 } from '../utils/routing';
 import { loadGeneratedPreset, loadHistory } from '../services/historyStore';
 
@@ -30,6 +32,7 @@ interface UseAppRoutingOptions {
   setSelectedSource: Dispatch<SetStateAction<SelectedSource>>;
   setSelectedHistoryResult: Dispatch<SetStateAction<AnalysisResult | null>>;
   setConceptTarget: Dispatch<SetStateAction<{ analysisId: string; keywordId: string } | null>>;
+  setRoundtableId: Dispatch<SetStateAction<string | null>>;
   hydratePresetForCurrentRoute: (route: string, onHydrated: (entry: HistoryEntry) => void) => HistoryEntry;
   hydrateHistoryForCurrentRoute: (route: string, entries: HistoryEntry[], historyId: string, onHydrated: (entry: HistoryEntry) => void) => void;
   findStoredEntry: (historyId: string, selectedResult?: AnalysisResult | null) => StoredEntryLookup | null;
@@ -45,6 +48,7 @@ export const useAppRouting = ({
   setSelectedSource,
   setSelectedHistoryResult,
   setConceptTarget,
+  setRoundtableId,
   hydratePresetForCurrentRoute,
   hydrateHistoryForCurrentRoute,
   findStoredEntry,
@@ -152,6 +156,16 @@ export const useAppRouting = ({
       return;
     }
 
+    if (route === '/roundtable' || route.startsWith('/roundtable/')) {
+      const rtId = route === '/roundtable' ? null : routeRoundtableId(route);
+      setSelectedSource(null);
+      setSelectedHistoryResult(null);
+      setConceptTarget(null);
+      setRoundtableId(rtId || null);
+      setView('roundtable');
+      return;
+    }
+
     setSelectedSource(null);
     setSelectedHistoryResult(null);
     setView('home');
@@ -163,6 +177,7 @@ export const useAppRouting = ({
     hydratePresetForCurrentRoute,
     selectedHistoryResult,
     setConceptTarget,
+    setRoundtableId,
     setSelectedHistoryResult,
     setSelectedSource,
     setTopic,
@@ -195,6 +210,8 @@ export const useAppRouting = ({
   const goHistory = useCallback(() => openRoute('/history'), [openRoute]);
   const goManifesto = useCallback(() => openRoute('/manifesto'), [openRoute]);
   const goSettings = useCallback(() => openRoute('/settings'), [openRoute]);
+  const goRoundtable = useCallback(() => openRoute('/roundtable'), [openRoute]);
+  const goRoundtableSession = useCallback((sessionId: string) => openRoute(roundtableSessionRoute(sessionId)), [openRoute]);
 
   const goToConcept = useCallback((analysisId: string, keywordId: string, fromRoute?: AppRoute) => {
     if (fromRoute) conceptBackRouteRef.current = fromRoute;
@@ -214,6 +231,8 @@ export const useAppRouting = ({
     goHistory,
     goManifesto,
     goSettings,
+    goRoundtable,
+    goRoundtableSession,
     goToConcept,
     goConceptBack,
     findAnalysisResultById,

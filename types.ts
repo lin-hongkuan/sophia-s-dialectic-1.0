@@ -460,3 +460,163 @@ export const emptyConclusion: OpenConclusion = {
   openQuestion: '',
   realLifeReturn: '',
 };
+
+/* ------------------------------------------------------------------ */
+/*  Roundtable ("实时圆桌会谈")                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lifecycle status of a roundtable session.
+ *
+ * - `idle`       — local draft, nothing planned yet.
+ * - `planning`   — sending the Planning call to the LLM.
+ * - `seating`    — participants planned, generating avatars.
+ * - `running`    — regular turn-by-turn phase is in progress.
+ * - `closing`    — generating the moderator's closing minutes.
+ * - `completed`  — minutes written, session frozen.
+ * - `error`      — terminal failure surfaced to the user.
+ * - `cancelled`  — user aborted mid-run; transcript up to that point is kept.
+ */
+export type RoundtableSessionStatus =
+  | 'idle'
+  | 'planning'
+  | 'seating'
+  | 'running'
+  | 'closing'
+  | 'completed'
+  | 'error'
+  | 'cancelled';
+
+export type RoundtableParticipantKind =
+  | 'philosopher'
+  | 'school'
+  | 'position'
+  | 'skeptic'
+  | 'moderator';
+
+export interface RoundtableParticipantAvatar {
+  /** Base64 data URL or remote URL. Empty string is an acceptable placeholder. */
+  imageUrl?: string;
+  prompt: string;
+  model: string;
+  alt: string;
+  generatedAt?: string;
+  status: 'queued' | 'generating' | 'completed' | 'failed';
+  error?: string;
+}
+
+export interface RoundtableParticipant {
+  id: string;
+  name: string;
+  kind: RoundtableParticipantKind;
+  /** Short functional description (e.g. "当代政治哲学批评者"). */
+  role: string;
+  /** 1-2 sentence statement of the position the participant will defend. */
+  stance: string;
+  /** Short temperament / speaking style hint ("谨慎、学究、善于举例"). */
+  temperament: string;
+  /** Other participant ids this seat is expected to contest. Optional. */
+  conflictWith?: string[];
+  avatar?: RoundtableParticipantAvatar;
+  /**
+   * UI-visible status per seat. `speaking` is a transient flag set while the
+   * participant has the floor; `silent` means their previous turn is done but
+   * they have not been invited again; `failed` captures avatar or turn
+   * failure.
+   */
+  status: 'planned' | 'seating' | 'present' | 'speaking' | 'silent' | 'failed';
+}
+
+/**
+ * A single moderator line, participant turn, user interjection, or closing
+ * minutes block in the transcript.
+ */
+export interface RoundtableTurn {
+  id: string;
+  phase: 'opening' | 'response' | 'conflict' | 'closing';
+  kind: 'moderator' | 'participant' | 'user_interjection' | 'minutes';
+  /** Required for kind === 'participant'. Absent for moderator / minutes / user. */
+  participantId?: string;
+  /** If the moderator or user points this turn at a specific seat. */
+  targetParticipantId?: string;
+  /** The previous participant this turn is replying to (Cross Response / Focused Conflict). */
+  replyToParticipantId?: string;
+  /** User-selected action — only meaningful when the turn originates from a user interjection. */
+  action?: 'ask' | 'rebut' | 'example' | 'cost' | 'close';
+  content: string;
+  status: 'queued' | 'streaming' | 'completed' | 'failed';
+  createdAt: string;
+  error?: string;
+}
+
+export interface RoundtableMinutes {
+  consensus: string;
+  disagreements: string[];
+  unresolvedQuestions: string[];
+  /** 3 suggested continuation questions written by the moderator. */
+  nextQuestions: string[];
+  realLifeReturn: string;
+}
+
+export interface RoundtableSession {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Raw topic the user typed. */
+  topic: string;
+  /** Model-written polished title ("自由与孤独的张力"). */
+  title: string;
+  /** Model-written core question ("在什么条件下，孤独是自由的代价？"). */
+  coreQuestion: string;
+  status: RoundtableSessionStatus;
+  participants: RoundtableParticipant[];
+  turns: RoundtableTurn[];
+  minutes?: RoundtableMinutes;
+  error?: string;
+  metadata?: {
+    tokenUsage?: TokenUsage[];
+    totalTokens?: number;
+    model?: string;
+    avatarModel?: string;
+  };
+}
+
+/* -------- Service / callbacks / control -------- */
+
+/** Directive passed to `generateNextRoundtableTurn` when the moderator decides what happens next. */
+export interface RoundtableTurnDirective {
+  /** Phase to anchor the prompt in. */
+  phase: RoundtableTurn['phase'];
+  /** Target participant id (for opening / response / conflict). Optional for closing. */
+  participantId?: string;
+  /** If the turn must reply to a specific earlier participant. */
+  replyToParticipantId?: string;
+  /** User interjection being folded into context, if any. */
+  userInterjectionTurnId?: string;
+  /** Force the next participant to use a certain action (ask / rebut / example / cost). */
+  action?: RoundtableTurn['action'];
+}
+
+export interface RoundtableCallbacks {
+  onSession?: (session: RoundtableSession) => void;
+  onParticipantUpdate?: (participant: RoundtableParticipant) => void;
+  onTurnStart?: (turn: RoundtableTurn) => void;
+  /** Fired whenever a streaming turn receives more content. */
+  onTurnDelta?: (turnId: string, delta: string, fullText: string) => void;
+  onTurnComplete?: (turn: RoundtableTurn) => void;
+  onMinutes?: (minutes: RoundtableMinutes) => void;
+  onError?: (message: string) => void;
+  onTokenUsage?: (usage: TokenUsage) => void;
+  /**
+   * Surfaces info / detail / warn / error lines the way `sophiaService`'s
+   * analyze pipeline does — reused so the UI can show a unified log panel.
+   */
+  onLog?: (entry: GenerationLogEntry) => void;
+}
+
+export interface RoundtableInterjectionSeed {
+  content: string;
+  targetParticipantId?: string;
+  action: 'ask' | 'rebut' | 'example' | 'cost' | 'close';
+}
+

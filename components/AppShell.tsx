@@ -22,6 +22,7 @@ interface AppShellProps {
   onHistory: () => void;
   onManifesto: () => void;
   onSettings: () => void;
+  onRoundtable: () => void;
   onOpenAnnouncement: () => void;
   onDismissAnnouncement: () => void;
   onAnnouncementCta?: () => void;
@@ -45,6 +46,7 @@ const AppShell: React.FC<AppShellProps> = ({
   onHistory,
   onManifesto,
   onSettings,
+  onRoundtable,
   onOpenAnnouncement,
   onDismissAnnouncement,
   onAnnouncementCta,
@@ -103,6 +105,7 @@ const AppShell: React.FC<AppShellProps> = ({
             <span className="hidden md:inline">Home</span>
           </button>
           <button type="button" onClick={onHistory} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
+          <button type="button" onClick={onRoundtable} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Roundtable</button>
           <button type="button" onClick={onManifesto} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
           <button type="button" onClick={onSettings} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
         </div>
