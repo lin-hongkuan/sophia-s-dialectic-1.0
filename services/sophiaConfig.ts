@@ -37,11 +37,22 @@ export interface RuntimeOptions {
   avatarConcurrency: number;
 }
 
+export type AnalysisDepth = 'concise' | 'standard' | 'deep';
+export type AnalysisExpressionStyle = 'academic' | 'plain' | 'sharp';
+export type AnalysisEvidenceFocus = 'theory' | 'balanced' | 'practical';
+
+export interface AnalysisProfile {
+  depth: AnalysisDepth;
+  expressionStyle: AnalysisExpressionStyle;
+  evidenceFocus: AnalysisEvidenceFocus;
+}
+
 export interface SophiaSettings {
   activeProviderId: ProviderId;
   customProvider: CustomProvider;
   promptOverrides: PromptOverrides;
   options: RuntimeOptions;
+  analysisProfile: AnalysisProfile;
 }
 
 /** Resolved view: merges Settings overrides on top of the env baseline. */
@@ -55,6 +66,7 @@ export interface ResolvedSophiaConfig {
   avatarAspectHint: string;
   promptOverrides: PromptOverrides;
   options: RuntimeOptions;
+  analysisProfile: AnalysisProfile;
   activeProviderId: ProviderId;
 }
 
@@ -63,6 +75,12 @@ const DEFAULT_OPTIONS: RuntimeOptions = {
   voiceMaxTokens: 7000,
   voiceConcurrency: 2,
   avatarConcurrency: 2,
+};
+
+export const DEFAULT_ANALYSIS_PROFILE: AnalysisProfile = {
+  depth: 'standard',
+  expressionStyle: 'academic',
+  evidenceFocus: 'balanced',
 };
 
 const DEFAULT_CUSTOM_PROVIDER: CustomProvider = {
@@ -78,6 +96,7 @@ export const DEFAULT_SETTINGS: SophiaSettings = {
   customProvider: { ...DEFAULT_CUSTOM_PROVIDER },
   promptOverrides: {},
   options: { ...DEFAULT_OPTIONS },
+  analysisProfile: { ...DEFAULT_ANALYSIS_PROFILE },
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
@@ -108,6 +127,7 @@ const cloneSettings = (settings: SophiaSettings): SophiaSettings => ({
   customProvider: { ...settings.customProvider },
   promptOverrides: { ...settings.promptOverrides },
   options: { ...settings.options },
+  analysisProfile: { ...settings.analysisProfile },
 });
 
 const sanitizeSettings = (raw: unknown): SophiaSettings => {
@@ -160,6 +180,18 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
         ? Math.round(opt.voiceConcurrency) : merged.options.voiceConcurrency,
       avatarConcurrency: typeof opt.avatarConcurrency === 'number' && opt.avatarConcurrency >= 1 && opt.avatarConcurrency <= 5
         ? Math.round(opt.avatarConcurrency) : merged.options.avatarConcurrency,
+    };
+  }
+
+  if (source.analysisProfile && typeof source.analysisProfile === 'object') {
+    const profile = source.analysisProfile as Partial<AnalysisProfile>;
+    merged.analysisProfile = {
+      depth: profile.depth === 'concise' || profile.depth === 'standard' || profile.depth === 'deep'
+        ? profile.depth : merged.analysisProfile.depth,
+      expressionStyle: profile.expressionStyle === 'academic' || profile.expressionStyle === 'plain' || profile.expressionStyle === 'sharp'
+        ? profile.expressionStyle : merged.analysisProfile.expressionStyle,
+      evidenceFocus: profile.evidenceFocus === 'theory' || profile.evidenceFocus === 'balanced' || profile.evidenceFocus === 'practical'
+        ? profile.evidenceFocus : merged.analysisProfile.evidenceFocus,
     };
   }
 
@@ -269,6 +301,7 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
       avatarAspectHint: ENV_BASELINE.avatarAspectHint,
       promptOverrides: settings.promptOverrides,
       options: settings.options,
+      analysisProfile: settings.analysisProfile,
       activeProviderId: settings.activeProviderId,
     };
   }
@@ -284,6 +317,7 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
     avatarAspectHint: ENV_BASELINE.avatarAspectHint,
     promptOverrides: settings.promptOverrides,
     options: settings.options,
+    analysisProfile: settings.analysisProfile,
     activeProviderId: settings.activeProviderId,
   };
 };

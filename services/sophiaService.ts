@@ -41,6 +41,7 @@ import {
   resolveVoiceSystemPrompt,
 } from './prompts';
 import { getActiveConfig } from './sophiaConfig';
+import { buildAnalysisProfileInstruction } from './analysisProfile';
 import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
 import { ModelJsonParseError, parseModelJson } from './jsonResponse';
 import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './stageCache';
@@ -417,41 +418,65 @@ const callChatJson = async <T>(messages: ChatMessage[], maxTokens = 4096): Promi
 const STREAM_IDLE_TIMEOUT_MS = 45000;
 const STREAM_FALLBACK_MIN_CHARS = 200;
 
+const callChatTextNonStreaming = async (
+  messages: ChatMessage[],
+  maxTokens = 4096,
+): Promise<string> => {
+  const cfg = getActiveConfig();
+  const response = await fetchWithRetry(chatEndpoint(), {
+    method: 'POST',
+    headers: requestHeaders(),
+    body: JSON.stringify({
+      model: cfg.apiModel,
+      messages,
+      temperature: cfg.options.temperature,
+      max_tokens: maxTokens,
+      stream: false,
+    }),
+  }, { timeoutMs: 120000, label: 'chat-text', signal: effectiveSignal(currentRunContext()) });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response));
+  }
+
+  const text = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = parseSseResponse(text);
+  }
+  recordUsageFromResponse(data?.usage);
+  return data.choices?.[0]?.message?.content || '';
+};
+
+const fallbackToNonStreamingText = async (
+  messages: ChatMessage[],
+  maxTokens: number,
+  onDelta: ((delta: string, fullText: string) => void) | undefined,
+  reason: string,
+): Promise<string> => {
+  // eslint-disable-next-line no-console
+  console.warn(`[sophia][chat-text-stream] ${reason}; falling back to non-streaming request`);
+  emitLog({
+    level: 'warn',
+    stage: currentRunContext()?.stage ?? 'voices',
+    message: `流式响应异常（${reason}），自动回退到非流式重试。`,
+  });
+  const text = await callChatTextNonStreaming(messages, maxTokens);
+  onDelta?.(text, text);
+  return text;
+};
+
 const callChatText = async (
   messages: ChatMessage[],
   maxTokens = 4096,
   onDelta?: (delta: string, fullText: string) => void,
 ): Promise<string> => {
-  const cfg = getActiveConfig();
-  if (!onDelta) {
-    const response = await fetchWithRetry(chatEndpoint(), {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        model: cfg.apiModel,
-        messages,
-        temperature: cfg.options.temperature,
-        max_tokens: maxTokens,
-        stream: false,
-      }),
-    }, { timeoutMs: 120000, label: 'chat-text', signal: effectiveSignal(currentRunContext()) });
-
-    if (!response.ok) {
-      throw new Error(await apiErrorMessage(response));
-    }
-
-    let data: any;
-    try {
-      data = await response.json();
-    } catch {
-      const text = await response.clone().text();
-      data = parseSseResponse(text);
-    }
-    recordUsageFromResponse(data?.usage);
-    return data.choices?.[0]?.message?.content || '';
-  }
+  if (!onDelta) return callChatTextNonStreaming(messages, maxTokens);
 
   // Streaming path: connect with retry+timeout, then read body with per-chunk idle timeout.
+  const cfg = getActiveConfig();
   const streamSignal = effectiveSignal(currentRunContext());
   const response = await fetchWithRetry(chatEndpoint(), {
     method: 'POST',
@@ -465,9 +490,13 @@ const callChatText = async (
     }),
   }, { timeoutMs: 60000, label: 'chat-text-stream-connect', signal: streamSignal });
 
-  if (!response.ok || !response.body) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`${cfg.apiProvider} 流式请求失败: ${response.status} ${text}`);
+  if (!response.ok) {
+    const message = await apiErrorMessage(response);
+    return fallbackToNonStreamingText(messages, maxTokens, onDelta, `流式连接失败：${message}`);
+  }
+
+  if (!response.body) {
+    return fallbackToNonStreamingText(messages, maxTokens, onDelta, `${cfg.apiProvider} 没有返回可读的流式响应`);
   }
 
   const reader = response.body.getReader();
@@ -534,12 +563,7 @@ const callChatText = async (
     }
     disarmIdleTimer();
     if (idleAborted && fullText.length < STREAM_FALLBACK_MIN_CHARS) {
-      emitLog({
-        level: 'warn',
-        stage: 'voices',
-        message: '流式响应空闲超时，自动回退到非流式重试。',
-      });
-      return callChatText(messages, maxTokens);
+      return fallbackToNonStreamingText(messages, maxTokens, onDelta, '流式响应空闲超时');
     }
     return fullText;
   } catch (error) {
@@ -556,14 +580,7 @@ const callChatText = async (
       ? '流式响应空闲超时'
       : error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     if (fullText.length < STREAM_FALLBACK_MIN_CHARS) {
-      // eslint-disable-next-line no-console
-      console.warn(`[sophia][chat-text-stream] dropped after ${fullText.length} chars (${reason}), falling back to non-streaming request`);
-      emitLog({
-        level: 'warn',
-        stage: 'voices',
-        message: `流式响应中断（${reason}），自动回退到非流式重试。`,
-      });
-      return callChatText(messages, maxTokens);
+      return fallbackToNonStreamingText(messages, maxTokens, onDelta, `流式响应在 ${fullText.length} 字后中断：${reason}`);
     }
     // Got a substantial partial: surface it instead of losing the work.
     // eslint-disable-next-line no-console
@@ -851,12 +868,14 @@ const formatContinuationContext = (context?: ContinuationContext) => {
 const generateOutline = async (topic: string, continuationContext?: ContinuationContext): Promise<AnalysisOutline> => {
   const continuationText = formatContinuationContext(continuationContext);
   const cfg = getActiveConfig();
-  const systemPrompt = resolveOutlineSystemPrompt(cfg.promptOverrides);
+  const profileInstruction = buildAnalysisProfileInstruction(cfg.analysisProfile);
+  const systemPrompt = `${resolveOutlineSystemPrompt(cfg.promptOverrides)}\n\n${profileInstruction}`;
   const fingerprint = {
     topic,
     continuationContext: continuationContext || null,
     model: cfg.apiModel,
     provider: cfg.apiProvider,
+    analysisProfile: cfg.analysisProfile,
     systemPrompt,
   };
 
@@ -1019,7 +1038,8 @@ const generateVoiceEssay = async (
   // on a cache hit we can still call onDelta with the full text in one shot —
   // the streaming UI relies on at least one onDelta to render the final body.
   const cfg = getActiveConfig();
-  const voiceSystemPrompt = resolveVoiceSystemPrompt(cfg.promptOverrides);
+  const profileInstruction = buildAnalysisProfileInstruction(cfg.analysisProfile);
+  const voiceSystemPrompt = `${resolveVoiceSystemPrompt(cfg.promptOverrides)}\n\n${profileInstruction}`;
   const voiceMaxTokens = cfg.options.voiceMaxTokens;
   const fingerprint = {
     topic,
@@ -1031,6 +1051,7 @@ const generateVoiceEssay = async (
     model: cfg.apiModel,
     provider: cfg.apiProvider,
     voiceMaxTokens,
+    analysisProfile: cfg.analysisProfile,
     voiceSystemPrompt,
   };
   const voiceCacheKey = buildStageKey('voice', fingerprint);
@@ -1171,7 +1192,8 @@ const generateSynthesis = async (
   };
 
   const cfg = getActiveConfig();
-  const systemPrompt = resolveSynthesisSystemPrompt(cfg.promptOverrides);
+  const profileInstruction = buildAnalysisProfileInstruction(cfg.analysisProfile);
+  const systemPrompt = `${resolveSynthesisSystemPrompt(cfg.promptOverrides)}\n\n${profileInstruction}`;
   // Synthesis only sees voice summaries (not full essays) — fingerprint matches
   // the prompt input exactly so a re-run on the same voices reuses output.
   const voicesSummary = voices.map((v) => ({
@@ -1186,6 +1208,7 @@ const generateSynthesis = async (
     voicesSummary,
     model: cfg.apiModel,
     provider: cfg.apiProvider,
+    analysisProfile: cfg.analysisProfile,
     systemPrompt,
   };
 

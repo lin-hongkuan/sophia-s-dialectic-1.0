@@ -111,10 +111,14 @@ export const apiErrorMessage = async (response: Response) => {
   const errorData = await response.json().catch(() => ({}));
   const upstream = errorData?.error?.message || errorData?.message || '';
   const code = errorData?.error?.code || '';
+  const type = errorData?.error?.type || '';
   const status = response.status;
+  const isGatewayBadStatus = code === 'bad_response_status_code' || type === 'bad_response_status_code';
 
   let summary = '';
-  if (status === 401) {
+  if (isGatewayBadStatus) {
+    summary = `${cfg.apiProvider} 网关返回了异常响应，通常是上游模型服务或流式通道波动。已自动重试仍失败，可以稍后再试，或在设置页切换 provider。`;
+  } else if (status === 401) {
     summary = 'API key 无效或已过期，请到设置页检查 / 更换 key。';
   } else if (status === 403) {
     summary = '当前 key 无权访问该模型，可能是账号未开通或被限制。';
@@ -135,5 +139,6 @@ export const apiErrorMessage = async (response: Response) => {
   const trail: string[] = [];
   if (upstream) trail.push(upstream);
   if (code && code !== upstream) trail.push(`code=${code}`);
+  if (type && type !== code && type !== upstream) trail.push(`type=${type}`);
   return trail.length > 0 ? `${summary}（${trail.join(' · ')}）` : summary;
 };

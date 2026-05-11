@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Settings as SettingsIcon, Sparkles, ShieldAlert, Database, Cpu, FileText, Sliders, BarChart3, Plug, RotateCcw, Download, Upload, Trash2, Check, AlertTriangle, Image as ImageIcon, Copy } from 'lucide-react';
 import {
+  DEFAULT_ANALYSIS_PROFILE,
   CustomProvider,
   ProviderId,
   SophiaSettings,
@@ -12,6 +13,7 @@ import {
   subscribe,
   updateSettings,
 } from '../services/sophiaConfig';
+import type { AnalysisProfile } from '../services/sophiaConfig';
 import { MODEL_PRESETS, ModelPreset } from '../services/modelPresets';
 import {
   AVATAR_STYLE_PRESETS,
@@ -33,6 +35,7 @@ import {
   exportCsv as exportTokenCsv,
   getTotals,
 } from '../services/tokenAccounting';
+import { apiErrorMessage } from '../services/apiClient';
 import { STAGE_LABEL } from '../constants';
 import { clearStageCache, countStageEntries } from '../services/stageCache';
 import { PageHero } from './PageHero';
@@ -41,7 +44,7 @@ interface SettingsPageProps {
   onBack: () => void;
 }
 
-type SectionId = 'provider' | 'prompts' | 'avatars' | 'options' | 'tokens' | 'data';
+type SectionId = 'provider' | 'profile' | 'prompts' | 'avatars' | 'options' | 'tokens' | 'data';
 
 interface PromptDef {
   key: keyof PromptOverrides;
@@ -122,6 +125,40 @@ type TestConnectionState =
   | { status: 'ok'; latencyMs: number }
   | { status: 'failed'; message: string };
 
+interface ProfileChoice {
+  value: string;
+  label: string;
+  description: string;
+}
+
+const DEPTH_CHOICES: ProfileChoice[] = [
+  { value: 'concise', label: '简洁', description: '更快给出判断，减少展开和重复。' },
+  { value: 'standard', label: '标准', description: '保持当前 Sophia 的完整密度。' },
+  { value: 'deep', label: '深挖', description: '增加分歧、反驳、代价和综合。' },
+];
+
+const EXPRESSION_CHOICES: ProfileChoice[] = [
+  { value: 'academic', label: '学术严谨', description: '强调概念边界、理论脉络和限定条件。' },
+  { value: 'plain', label: '通俗清楚', description: '先讲人话，再解释必要术语。' },
+  { value: 'sharp', label: '锋利诊断', description: '直接指出矛盾、逃避点和价值代价。' },
+];
+
+const EVIDENCE_CHOICES: ProfileChoice[] = [
+  { value: 'theory', label: '偏理论', description: '更多流派、概念和思想史关系。' },
+  { value: 'balanced', label: '均衡', description: '理论解释与现实例子各占一部分。' },
+  { value: 'practical', label: '偏现实', description: '更多工作、关系、教育、技术等场景。' },
+];
+
+const labelForChoice = (choices: ProfileChoice[], value: string): string =>
+  choices.find((choice) => choice.value === value)?.label || '';
+
+const analysisProfileSummary = (profile: AnalysisProfile): string => {
+  const depth = labelForChoice(DEPTH_CHOICES, profile.depth);
+  const style = labelForChoice(EXPRESSION_CHOICES, profile.expressionStyle);
+  const focus = labelForChoice(EVIDENCE_CHOICES, profile.evidenceFocus);
+  return `当前画像：${depth}深度，${style}，${focus}。改动会影响下一次生成的长度、语气、例子密度和综合判断风格。`;
+};
+
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return '0';
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
@@ -195,6 +232,42 @@ const ProviderCard: React.FC<{
     </button>
   );
 };
+
+const ProfileChoiceGroup: React.FC<{
+  title: string;
+  description: string;
+  value: string;
+  choices: ProfileChoice[];
+  onChange: (value: string) => void;
+}> = ({ title, description, value, choices, onChange }) => (
+  <fieldset>
+    <legend className="text-[11px] font-mono uppercase tracking-widest text-museum-500">{title}</legend>
+    <p className="mt-1 text-[12px] leading-relaxed text-museum-600">{description}</p>
+    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label={title}>
+      {choices.map((choice) => {
+        const selected = value === choice.value;
+        return (
+          <button
+            key={choice.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(choice.value)}
+            className={`min-h-[76px] rounded-lg border px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-museum-700/40 ${
+              selected
+                ? 'border-museum-800 bg-museum-900 text-museum-50 shadow'
+                : 'border-museum-200 bg-white/70 text-museum-800 hover:border-museum-400 hover:bg-white'
+            }`}
+          >
+            <span className={`block font-serif text-base ${selected ? 'text-museum-50' : 'text-museum-900'}`}>{choice.label}</span>
+            <span className={`mt-1 block text-[11px] leading-relaxed ${selected ? 'text-museum-200' : 'text-museum-600'}`}>
+              {choice.description}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  </fieldset>
+);
 
 const Bar: React.FC<{ label: string; value: number; total: number; subtitle?: string }> = ({ label, value, total, subtitle }) => {
   const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
@@ -292,6 +365,16 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
 
   const handleOptionChange = (patch: Partial<SophiaSettings['options']>) => {
     updateSettings((current) => ({ options: { ...current.options, ...patch } }));
+  };
+
+  const handleProfileChange = (patch: Partial<AnalysisProfile>) => {
+    updateSettings((current) => ({
+      analysisProfile: { ...current.analysisProfile, ...patch },
+    }));
+  };
+
+  const handleResetProfile = () => {
+    updateSettings({ analysisProfile: { ...DEFAULT_ANALYSIS_PROFILE } });
   };
 
   const handlePromptChange = (key: keyof PromptOverrides, value: string) => {
@@ -419,22 +502,7 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
         setLatestTestState({ status: 'ok', latencyMs: elapsed });
         return;
       }
-      const status = response.status;
-      let summary: string;
-      if (status === 401) summary = 'API key 无效或已过期。';
-      else if (status === 403) summary = '当前 key 无该模型的访问权限。';
-      else if (status === 404) summary = '模型名错误或服务未上线。';
-      else if (status === 429) summary = '触发了配额或限流。';
-      else if (status >= 500) summary = '上游服务波动，请稍后重试。';
-      else summary = `请求被拒绝（HTTP ${status}）。`;
-      let upstream = '';
-      try {
-        const data = await response.json();
-        upstream = data?.error?.message || data?.message || '';
-      } catch {
-        // ignore
-      }
-      setLatestTestState({ status: 'failed', message: upstream ? `${summary}（${upstream}）` : summary });
+      setLatestTestState({ status: 'failed', message: await apiErrorMessage(response) });
     } catch (error) {
       if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : '未知错误';
@@ -491,6 +559,7 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
 
   const sections: Array<{ id: SectionId; label: string; icon: React.ReactNode }> = [
     { id: 'provider', label: '生成模型', icon: <Cpu className="h-3.5 w-3.5" /> },
+    { id: 'profile', label: '分析画像', icon: <Sparkles className="h-3.5 w-3.5" /> },
     { id: 'prompts', label: '提示词', icon: <FileText className="h-3.5 w-3.5" /> },
     { id: 'avatars', label: '头像风格', icon: <ImageIcon className="h-3.5 w-3.5" /> },
     { id: 'options', label: '运行参数', icon: <Sliders className="h-3.5 w-3.5" /> },
@@ -691,6 +760,59 @@ const SettingsPage: React.FC<SettingsPageProps> = () => {
                 </span>
               )}
             </span>
+          </div>
+        </section>
+      )}
+
+      {active === 'profile' && (
+        <section
+          id="settings-panel-profile"
+          role="tabpanel"
+          aria-labelledby="settings-tab-profile"
+          className="mt-8 rounded-xl border border-museum-200 bg-white/60 p-6"
+        >
+          <SectionHeader
+            icon={<Sparkles className="h-4 w-4" />}
+            title="分析画像"
+            description="用普通语言控制 Sophia 的输出倾向。它会叠加到系统提示词上，影响下一次生成的长度、语气、例子密度与综合判断风格。"
+          />
+
+          <div className="space-y-7">
+            <ProfileChoiceGroup
+              title="分析深度"
+              description="决定这次分析是快速收束，还是展开更多分歧和代价。"
+              value={settings.analysisProfile.depth}
+              choices={DEPTH_CHOICES}
+              onChange={(value) => handleProfileChange({ depth: value as AnalysisProfile['depth'] })}
+            />
+            <ProfileChoiceGroup
+              title="表达方式"
+              description="决定 Sophia 说话时更像学术编辑、清晰讲解者，还是诊断式批评者。"
+              value={settings.analysisProfile.expressionStyle}
+              choices={EXPRESSION_CHOICES}
+              onChange={(value) => handleProfileChange({ expressionStyle: value as AnalysisProfile['expressionStyle'] })}
+            />
+            <ProfileChoiceGroup
+              title="例证重心"
+              description="决定论证材料更靠近理论脉络，还是更多回到现实场景。"
+              value={settings.analysisProfile.evidenceFocus}
+              choices={EVIDENCE_CHOICES}
+              onChange={(value) => handleProfileChange({ evidenceFocus: value as AnalysisProfile['evidenceFocus'] })}
+            />
+          </div>
+
+          <div className="mt-7 flex flex-col gap-3 rounded-lg border border-museum-200 bg-museum-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[13px] leading-relaxed text-museum-700">
+              {analysisProfileSummary(settings.analysisProfile)}
+            </p>
+            <button
+              type="button"
+              onClick={handleResetProfile}
+              className="inline-flex shrink-0 items-center justify-center gap-1 rounded border border-museum-200 bg-white/70 px-3 py-2 text-[11px] text-museum-600 hover:bg-museum-100"
+            >
+              <RotateCcw className="h-3 w-3" />
+              恢复默认画像
+            </button>
           </div>
         </section>
       )}

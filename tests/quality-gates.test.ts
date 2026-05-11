@@ -15,7 +15,8 @@ import {
 } from '../utils/generationLog.ts';
 import { isStageEntryUsable, STAGE_TTL_MS } from '../services/stageCache.ts';
 import { compareRunSnapshotsByUpdatedAtDesc, isResumableRunSnapshot } from '../services/runSnapshotStore.ts';
-import { importSettings, getActiveConfig, resetToDefaults } from '../services/sophiaConfig.ts';
+import { DEFAULT_ANALYSIS_PROFILE, exportSettings, importSettings, getActiveConfig, resetToDefaults } from '../services/sophiaConfig.ts';
+import { buildAnalysisProfileInstruction } from '../services/analysisProfile.ts';
 import { clearAll, exportCsv, flushNow, recordUsage } from '../services/tokenAccounting.ts';
 import type { RunSnapshot } from '../types.ts';
 
@@ -129,6 +130,35 @@ test('normalizes runtime config without leaking custom image model into presets'
   }));
   const preset = getActiveConfig();
   assert.notEqual(preset.avatarImageModel, 'custom-image-should-not-leak');
+  resetToDefaults();
+});
+
+test('normalizes analysis profile settings defensively', () => {
+  importSettings(JSON.stringify({
+    analysisProfile: {
+      depth: 'deep',
+      expressionStyle: 'plain',
+      evidenceFocus: 'practical',
+    },
+  }));
+
+  const profile = {
+    depth: 'deep',
+    expressionStyle: 'plain',
+    evidenceFocus: 'practical',
+  } as const;
+  assert.deepEqual(getActiveConfig().analysisProfile, profile);
+  assert.deepEqual(JSON.parse(exportSettings()).analysisProfile, profile);
+  assert.match(buildAnalysisProfileInstruction(profile), /practical-first/);
+
+  importSettings(JSON.stringify({
+    analysisProfile: {
+      depth: 'invalid',
+      expressionStyle: 'invalid',
+      evidenceFocus: 'invalid',
+    },
+  }));
+  assert.deepEqual(getActiveConfig().analysisProfile, DEFAULT_ANALYSIS_PROFILE);
   resetToDefaults();
 });
 
