@@ -20,6 +20,90 @@ export const requestHeaders = () => {
 export const chatEndpoint = () => `${getActiveConfig().apiBaseUrl}/chat/completions`;
 export const imageEndpoint = () => `${getActiveConfig().apiBaseUrl}/images/generations`;
 
+const textFromContentPart = (part: unknown): string => {
+  if (typeof part === 'string') return part;
+  if (!part || typeof part !== 'object') return '';
+  const record = part as Record<string, unknown>;
+  if (typeof record.text === 'string') return record.text;
+  if (typeof record.content === 'string') return record.content;
+  return '';
+};
+
+const textFromChatContent = (content: unknown): string => {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(textFromContentPart).join('');
+  return '';
+};
+
+export const extractChatCompletionContent = (data: unknown): string => {
+  if (!data || typeof data !== 'object') return '';
+  const choice = (data as any).choices?.[0];
+  return textFromChatContent(choice?.message?.content)
+    || textFromChatContent(choice?.delta?.content)
+    || textFromChatContent(choice?.text);
+};
+
+export const parseChatCompletionResponseText = (text: string): any => {
+  const trimmed = text.trim();
+  if (!trimmed) return {};
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Some OpenAI-compatible gateways return SSE even when stream:false was
+    // requested. Normalize those chunks into the usual message.content shape.
+  }
+
+  const events: any[] = [];
+  let streamedContent = '';
+  let latestMessageContent = '';
+  let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+
+  for (const line of trimmed.split(/\r?\n/)) {
+    const current = line.trim();
+    if (!current || current.startsWith(':') || !current.startsWith('data:')) continue;
+    const payload = current.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+
+    try {
+      const parsed = JSON.parse(payload);
+      events.push(parsed);
+      if (parsed?.usage) usage = parsed.usage;
+
+      const choice = parsed?.choices?.[0];
+      const deltaContent = textFromChatContent(choice?.delta?.content);
+      if (deltaContent) streamedContent += deltaContent;
+
+      const messageContent = textFromChatContent(choice?.message?.content);
+      if (messageContent) latestMessageContent = messageContent;
+    } catch {
+      // Ignore non-JSON keepalive lines.
+    }
+  }
+
+  if (events.length === 0) {
+    throw new Error('No valid JSON found in SSE response');
+  }
+
+  const last = events[events.length - 1];
+  const normalized = { ...last };
+  const content = streamedContent || latestMessageContent || extractChatCompletionContent(last);
+  if (content) {
+    const choices = Array.isArray(last?.choices) && last.choices.length > 0 ? [...last.choices] : [{}];
+    const firstChoice = choices[0] || {};
+    choices[0] = {
+      ...firstChoice,
+      message: {
+        ...(firstChoice.message || {}),
+        content,
+      },
+    };
+    normalized.choices = choices;
+  }
+  if (usage) normalized.usage = usage;
+  return normalized;
+};
+
 const isTransientStatus = (status: number) => status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 
 const wait = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {

@@ -12,6 +12,7 @@ import { getActiveConfig } from './sophiaConfig';
 import { resolveTopicReframeSystemPrompt } from './prompts';
 import { buildUsage, recordUsage } from './tokenAccounting';
 import { parseModelJson } from './jsonResponse';
+import { extractChatCompletionContent, parseChatCompletionResponseText } from './apiClient';
 
 export interface ReframeCandidate {
   title: string;
@@ -82,23 +83,12 @@ export const reframeUserTopic = async (rawTopic: string): Promise<TopicReframeRe
       return EMPTY;
     }
 
-    const data = await response.json().catch(async () => {
-      const text = await response.clone().text();
-      const lines = text.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-        const payload = trimmed.slice(5).trim();
-        if (payload === '[DONE]') continue;
-        try { return JSON.parse(payload); } catch { /* continue */ }
-      }
-      return null;
-    });
+    const data = parseChatCompletionResponseText(await response.text());
     const usage = buildUsage(data?.usage, 'reframe', cfg.apiModel);
     if (usage) recordUsage(usage);
 
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content || typeof content !== 'string') return EMPTY;
+    const content = extractChatCompletionContent(data);
+    if (!content) return EMPTY;
 
     const parsed = parseJsonContent<{ shouldReframe?: boolean; candidates?: unknown }>(content);
     const candidates = sanitizeCandidates(parsed.candidates);

@@ -18,6 +18,7 @@ import { compareRunSnapshotsByUpdatedAtDesc, isResumableRunSnapshot } from '../s
 import { DEFAULT_ANALYSIS_PROFILE, exportSettings, importSettings, getActiveConfig, resetToDefaults } from '../services/sophiaConfig.ts';
 import { buildAnalysisProfileInstruction } from '../services/analysisProfile.ts';
 import { clearAll, exportCsv, flushNow, recordUsage } from '../services/tokenAccounting.ts';
+import { extractChatCompletionContent, parseChatCompletionResponseText } from '../services/apiClient.ts';
 import type { RunSnapshot } from '../types.ts';
 
 const makeSnapshot = (partial: Partial<RunSnapshot>): RunSnapshot => ({
@@ -75,6 +76,36 @@ test('caps generation logs and derives snapshot checkpoints', () => {
   assert.equal(checkpointStageForProgress({ stage: 'outline', totalVoices: 0, completedVoices: 0, messages: [] }), 'outline');
   assert.equal(checkpointStageForProgress({ stage: 'voices', totalVoices: 1, completedVoices: 0, messages: [] }), 'route');
   assert.equal(checkpointStageForProgress({ stage: 'done', totalVoices: 1, completedVoices: 1, messages: [] }), 'synthesis');
+});
+
+test('normalizes SSE chat completions returned to non-streaming callers', () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+    'data: {"choices":[{"delta":{"content":"{\\"ok\\":"}}]}',
+    'data: {"choices":[{"delta":{"content":"true}"}}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}',
+    'data: [DONE]',
+  ].join('\n');
+
+  const data = parseChatCompletionResponseText(sse);
+  assert.equal(extractChatCompletionContent(data), '{"ok":true}');
+  assert.equal(data.usage.total_tokens, 3);
+  assert.equal(data.choices[0].finish_reason, 'stop');
+});
+
+test('extracts text from array-style chat completion content', () => {
+  const data = parseChatCompletionResponseText(JSON.stringify({
+    choices: [{
+      message: {
+        content: [
+          { type: 'text', text: '{"answer":' },
+          { type: 'text', text: '"yes"}' },
+        ],
+      },
+    }],
+  }));
+
+  assert.equal(extractChatCompletionContent(data), '{"answer":"yes"}');
 });
 
 test('rejects stale or malformed stage cache entries', () => {

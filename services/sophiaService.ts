@@ -45,7 +45,16 @@ import { buildAnalysisProfileInstruction } from './analysisProfile';
 import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
 import { ModelJsonParseError, parseModelJson } from './jsonResponse';
 import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './stageCache';
-import { apiErrorMessage, chatEndpoint, fetchWithRetry, imageEndpoint, requestHeaders, type ChatMessage } from './apiClient';
+import {
+  apiErrorMessage,
+  chatEndpoint,
+  extractChatCompletionContent,
+  fetchWithRetry,
+  imageEndpoint,
+  parseChatCompletionResponseText,
+  requestHeaders,
+  type ChatMessage,
+} from './apiClient';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
@@ -331,22 +340,6 @@ export const generateThoughtVoiceAvatar = async (
   );
 };
 
-const parseSseResponse = (text: string): unknown => {
-  const lines = text.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || !trimmed.startsWith('data:')) continue;
-    const payload = trimmed.slice(5).trim();
-    if (payload === '[DONE]') continue;
-    try {
-      return JSON.parse(payload);
-    } catch {
-      // continue to next line
-    }
-  }
-  throw new Error('No valid JSON found in SSE response');
-};
-
 // Appended as an extra system message on the second attempt of callChatJson when
 // the first attempt returned content we couldn't parse even after markdown recovery.
 // Some providers (Grok we've seen in practice) ignore response_format hints and wrap
@@ -377,14 +370,9 @@ const callChatJsonOnce = async <T>(
   }
 
   const text = await response.text();
-  let data: any;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = parseSseResponse(text);
-  }
+  const data = parseChatCompletionResponseText(text);
   recordUsageFromResponse(data?.usage);
-  const content = data.choices?.[0]?.message?.content;
+  const content = extractChatCompletionContent(data);
   if (!content) {
     throw new ModelJsonParseError('苏菲没有回应。API 返回数据格式异常。', '');
   }
@@ -440,14 +428,9 @@ const callChatTextNonStreaming = async (
   }
 
   const text = await response.text();
-  let data: any;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = parseSseResponse(text);
-  }
+  const data = parseChatCompletionResponseText(text);
   recordUsageFromResponse(data?.usage);
-  return data.choices?.[0]?.message?.content || '';
+  return extractChatCompletionContent(data);
 };
 
 const fallbackToNonStreamingText = async (
