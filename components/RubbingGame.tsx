@@ -7,39 +7,63 @@ interface RubbingGameProps {
   variant?: 'panel' | 'compact';
 }
 
-type Quadrant = 'nw' | 'ne' | 'sw' | 'se';
+type TileId =
+  | 'r1c1'
+  | 'r1c2'
+  | 'r1c3'
+  | 'r2c1'
+  | 'r2c2'
+  | 'r2c3'
+  | 'r3c1'
+  | 'r3c2'
+  | 'r3c3';
 
 interface PieceState {
-  id: Quadrant;
+  id: TileId;
   placed: boolean;
 }
 
-const QUADRANTS: Quadrant[] = ['nw', 'ne', 'sw', 'se'];
+const TILE_IDS: TileId[] = ['r1c1', 'r1c2', 'r1c3', 'r2c1', 'r2c2', 'r2c3', 'r3c1', 'r3c2', 'r3c3'];
 
-const QUADRANT_LABEL: Record<Quadrant, string> = {
-  nw: 'A',
-  ne: 'B',
-  sw: 'C',
-  se: 'D',
+const TILE_LABEL: Record<TileId, string> = {
+  r1c1: 'A',
+  r1c2: 'B',
+  r1c3: 'C',
+  r2c1: 'D',
+  r2c2: 'E',
+  r2c3: 'F',
+  r3c1: 'G',
+  r3c2: 'H',
+  r3c3: 'I',
 };
 
-const QUADRANT_VIEWBOX: Record<Quadrant, string> = {
-  nw: '0 0 256 256',
-  ne: '256 0 256 256',
-  sw: '0 256 256 256',
-  se: '256 256 256 256',
+const TILE_VIEWBOX: Record<TileId, string> = {
+  r1c1: '0 0 170.6667 170.6667',
+  r1c2: '170.6667 0 170.6667 170.6667',
+  r1c3: '341.3333 0 170.6667 170.6667',
+  r2c1: '0 170.6667 170.6667 170.6667',
+  r2c2: '170.6667 170.6667 170.6667 170.6667',
+  r2c3: '341.3333 170.6667 170.6667 170.6667',
+  r3c1: '0 341.3333 170.6667 170.6667',
+  r3c2: '170.6667 341.3333 170.6667 170.6667',
+  r3c3: '341.3333 341.3333 170.6667 170.6667',
 };
 
 const LAYOUT = {
   panel: {
     board: 280,
-    piece: 104,
+    piece: 88,
   },
   compact: {
     board: 208,
-    piece: 78,
+    piece: 64,
   },
 };
+
+const GRID_LINE_BACKGROUND = [
+  'linear-gradient(90deg, transparent calc(33.333% - 0.5px), rgba(44,42,38,0.18) calc(33.333% - 0.5px), rgba(44,42,38,0.18) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px), transparent calc(66.667% - 0.5px), rgba(44,42,38,0.18) calc(66.667% - 0.5px), rgba(44,42,38,0.18) calc(66.667% + 0.5px), transparent calc(66.667% + 0.5px))',
+  'linear-gradient(0deg, transparent calc(33.333% - 0.5px), rgba(44,42,38,0.18) calc(33.333% - 0.5px), rgba(44,42,38,0.18) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px), transparent calc(66.667% - 0.5px), rgba(44,42,38,0.18) calc(66.667% - 0.5px), rgba(44,42,38,0.18) calc(66.667% + 0.5px), transparent calc(66.667% + 0.5px))',
+].join(',');
 
 const shuffle = <T,>(items: T[]): T[] => {
   const next = [...items];
@@ -50,13 +74,18 @@ const shuffle = <T,>(items: T[]): T[] => {
   return next;
 };
 
-const freshPieces = (): PieceState[] => shuffle(QUADRANTS).map((id) => ({ id, placed: false }));
+const freshPieces = (): PieceState[] => shuffle(TILE_IDS).map((id) => ({ id, placed: false }));
 
-const pieceTone: Record<Quadrant, string> = {
-  nw: '#2C2A26',
-  ne: '#3D3932',
-  sw: '#5B5246',
-  se: '#746B5E',
+const pieceTone: Record<TileId, string> = {
+  r1c1: '#2C2A26',
+  r1c2: '#34312C',
+  r1c3: '#3D3932',
+  r2c1: '#4A443C',
+  r2c2: '#524B42',
+  r2c3: '#5B5246',
+  r3c1: '#665D51',
+  r3c2: '#6E665A',
+  r3c3: '#746B5E',
 };
 
 interface ArtifactStory {
@@ -126,12 +155,12 @@ const DEFAULT_STORY: ArtifactStory = {
 
 const ArtifactFragment: React.FC<{
   artifact: RubbingArtifact;
-  quadrant: Quadrant;
+  quadrant: TileId;
   className?: string;
   tone?: string;
 }> = ({ artifact, quadrant, className = '', tone = '#2C2A26' }) => (
   <svg
-    viewBox={QUADRANT_VIEWBOX[quadrant]}
+    viewBox={TILE_VIEWBOX[quadrant]}
     preserveAspectRatio="xMidYMid meet"
     className={className}
     aria-hidden="true"
@@ -142,7 +171,7 @@ const ArtifactFragment: React.FC<{
 
 const BoardSlot: React.FC<{
   artifact: RubbingArtifact;
-  quadrant: Quadrant;
+  quadrant: TileId;
   placed: boolean;
   active: boolean;
   wrong: boolean;
@@ -159,7 +188,7 @@ const BoardSlot: React.FC<{
           ? 'border-museum-800 bg-museum-50'
           : 'border-museum-200 hover:border-museum-400'
     } ${wrong ? 'animate-[pulse_0.35s_ease-in-out_2] border-red-300 bg-red-50/70' : ''}`}
-    aria-label={`展柜位置 ${QUADRANT_LABEL[quadrant]}`}
+    aria-label={`展柜位置 ${TILE_LABEL[quadrant]}`}
   >
     <div className="absolute inset-0 bg-[radial-gradient(circle_at_35%_25%,rgba(255,255,255,0.85),transparent_42%),linear-gradient(135deg,rgba(249,248,246,0.95),rgba(230,226,216,0.45))]" />
     <ArtifactFragment
@@ -171,7 +200,7 @@ const BoardSlot: React.FC<{
       }`}
     />
     <span className="absolute left-2 top-2 rounded-full border border-museum-200 bg-white/80 px-1.5 py-0.5 text-[9px] font-mono text-museum-500">
-      {QUADRANT_LABEL[quadrant]}
+      {TILE_LABEL[quadrant]}
     </span>
   </button>
 );
@@ -181,15 +210,15 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
   const { board, piece } = LAYOUT[variant];
   const [artifact, setArtifact] = useState<RubbingArtifact>(() => pickRandomArtifact());
   const [pieces, setPieces] = useState<PieceState[]>(freshPieces);
-  const [selected, setSelected] = useState<Quadrant | null>(null);
-  const [dragging, setDragging] = useState<Quadrant | null>(null);
+  const [selected, setSelected] = useState<TileId | null>(null);
+  const [dragging, setDragging] = useState<TileId | null>(null);
   const [dragPreview, setDragPreview] = useState({ x: 0, y: 0, offsetX: 0, offsetY: 0, size: piece });
-  const [wrongSlot, setWrongSlot] = useState<Quadrant | null>(null);
+  const [wrongSlot, setWrongSlot] = useState<TileId | null>(null);
   const [round, setRound] = useState(1);
   const [streak, setStreak] = useState(0);
 
   const placedCount = pieces.filter((p) => p.placed).length;
-  const done = placedCount === QUADRANTS.length;
+  const done = placedCount === TILE_IDS.length;
   const selectedPiece = selected && pieces.find((p) => p.id === selected && !p.placed) ? selected : null;
   const story = ARTIFACT_STORIES[artifact.id] || DEFAULT_STORY;
 
@@ -215,7 +244,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
     setRound((value) => value + 1);
   }, []);
 
-  const tryPlace = useCallback((pieceId: Quadrant, slotId: Quadrant | null) => {
+  const tryPlace = useCallback((pieceId: TileId, slotId: TileId | null) => {
     if (!slotId) return;
     if (pieceId !== slotId) {
       setWrongSlot(slotId);
@@ -227,14 +256,14 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
     setStreak((value) => value + 1);
   }, []);
 
-  const slotFromPoint = (x: number, y: number): Quadrant | null => {
+  const slotFromPoint = (x: number, y: number): TileId | null => {
     const el = document.elementFromPoint(x, y) as HTMLElement | null;
     const slot = el?.closest('[data-slot]') as HTMLElement | null;
     const value = slot?.dataset.slot;
-    return QUADRANTS.includes(value as Quadrant) ? (value as Quadrant) : null;
+    return TILE_IDS.includes(value as TileId) ? (value as TileId) : null;
   };
 
-  const onPiecePointerDown = (pieceId: Quadrant, e: React.PointerEvent<HTMLButtonElement>) => {
+  const onPiecePointerDown = (pieceId: TileId, e: React.PointerEvent<HTMLButtonElement>) => {
     if (done) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setSelected(pieceId);
@@ -271,16 +300,16 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
   };
 
   const placedMap = useMemo(() => {
-    const map = new Map<Quadrant, boolean>();
+    const map = new Map<TileId, boolean>();
     pieces.forEach((p) => map.set(p.id, p.placed));
     return map;
   }, [pieces]);
 
   const remainingPieces = pieces.filter((p) => !p.placed);
-  const progress = `${placedCount}/4`;
+  const progress = `${placedCount}/${TILE_IDS.length}`;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="relative flex w-full flex-col items-center">
       <div className="mb-3 flex w-full items-end justify-between gap-4" style={{ maxWidth: board }}>
         <div>
           <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500">
@@ -295,11 +324,11 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
       </div>
 
       <div
-        className="relative grid grid-cols-2 overflow-hidden border border-museum-300 bg-museum-100/50 shadow-sm"
+        className="relative grid grid-cols-3 overflow-hidden border border-museum-300 bg-museum-100/50 shadow-sm"
         style={{ width: board, height: board }}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent_calc(50%-0.5px),rgba(44,42,38,0.18)_calc(50%-0.5px),rgba(44,42,38,0.18)_calc(50%+0.5px),transparent_calc(50%+0.5px)),linear-gradient(0deg,transparent_calc(50%-0.5px),rgba(44,42,38,0.18)_calc(50%-0.5px),rgba(44,42,38,0.18)_calc(50%+0.5px),transparent_calc(50%+0.5px))]" />
-        {QUADRANTS.map((quadrant) => (
+        <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: GRID_LINE_BACKGROUND }} />
+        {TILE_IDS.map((quadrant) => (
           <BoardSlot
             key={`${uid}-${quadrant}`}
             artifact={artifact}
@@ -321,10 +350,11 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
         )}
       </div>
 
-      <div
-        className="mt-4 grid grid-cols-4 gap-2"
-        style={{ width: board }}
-      >
+      {!done && (
+        <div
+          className="mt-4 grid grid-cols-3 gap-2"
+          style={{ width: board }}
+        >
         {remainingPieces.map((item) => (
           <button
             key={item.id}
@@ -339,7 +369,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
                 ? 'border-museum-900 -translate-y-0.5'
                 : 'border-museum-200 hover:border-museum-500'
             } ${dragging === item.id ? 'opacity-30' : 'opacity-100'}`}
-            aria-label={`碎片 ${QUADRANT_LABEL[item.id]}`}
+            aria-label={`碎片 ${TILE_LABEL[item.id]}`}
             style={{ minWidth: variant === 'compact' ? 44 : 58 }}
           >
             <div className="absolute inset-0 bg-[linear-gradient(135deg,#F9F8F6,#E6E2D8)]" />
@@ -350,21 +380,22 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
               className="absolute inset-2 h-[calc(100%-16px)] w-[calc(100%-16px)]"
             />
             <span className="absolute right-1.5 top-1.5 rounded-full bg-museum-900 px-1.5 py-0.5 text-[9px] font-mono text-museum-50">
-              {QUADRANT_LABEL[item.id]}
+              {TILE_LABEL[item.id]}
             </span>
           </button>
         ))}
-        {Array.from({ length: Math.max(0, 4 - remainingPieces.length) }).map((_, index) => (
+        {Array.from({ length: Math.max(0, TILE_IDS.length - remainingPieces.length) }).map((_, index) => (
           <div
             key={`empty-${index}`}
             className="aspect-square border border-dashed border-museum-200 bg-museum-50/50"
           />
         ))}
-      </div>
+        </div>
+      )}
 
       {done && (
-        <div
-          className="mt-4 border border-museum-200 bg-white/80 px-4 py-4 text-left shadow-sm animate-fade-in"
+        <aside
+          className="mt-4 max-h-[340px] overflow-auto border border-museum-200 bg-white/90 px-4 py-4 text-left shadow-sm animate-fade-in"
           style={{ width: board }}
         >
           <div className="flex items-start justify-between gap-3">
@@ -383,7 +414,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
             <p><span className="font-mono uppercase tracking-widest text-museum-400">看点</span> {story.detail}</p>
             <p><span className="font-mono uppercase tracking-widest text-museum-400">为什么有意思</span> {story.thought}</p>
           </div>
-        </div>
+        </aside>
       )}
 
       {dragging && typeof document !== 'undefined' && createPortal(
@@ -426,7 +457,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
       </div>
 
       <p className="mt-3 max-w-xs text-center text-[10px] leading-relaxed text-museum-400">
-        {done ? '展柜已合拢，可以换下一件藏品。' : selectedPiece ? `碎片 ${QUADRANT_LABEL[selectedPiece]} 已取出。` : '把散落的藏品碎片放回展柜。'}
+        {done ? '展柜已合拢，可以换下一件藏品。' : selectedPiece ? `碎片 ${TILE_LABEL[selectedPiece]} 已取出。` : '把散落的藏品碎片放回展柜。'}
       </p>
 
       <p className="mt-2 text-center font-mono text-[9px] tracking-wider text-museum-300">

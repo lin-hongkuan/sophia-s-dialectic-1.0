@@ -35,6 +35,8 @@ export interface RuntimeOptions {
   /** Concurrency for parallel avatar image generation. Default 2. Capped independently of
    *  voiceConcurrency so a slow image model can't pile up requests on the upstream provider. */
   avatarConcurrency: number;
+  /** Extra retries after an image generation request fails. Default 2. */
+  imageRetryCount: number;
 }
 
 export type AnalysisDepth = 'concise' | 'standard' | 'deep';
@@ -75,6 +77,7 @@ const DEFAULT_OPTIONS: RuntimeOptions = {
   voiceMaxTokens: 7000,
   voiceConcurrency: 2,
   avatarConcurrency: 2,
+  imageRetryCount: 2,
 };
 
 export const DEFAULT_ANALYSIS_PROFILE: AnalysisProfile = {
@@ -180,6 +183,8 @@ const sanitizeSettings = (raw: unknown): SophiaSettings => {
         ? Math.round(opt.voiceConcurrency) : merged.options.voiceConcurrency,
       avatarConcurrency: typeof opt.avatarConcurrency === 'number' && opt.avatarConcurrency >= 1 && opt.avatarConcurrency <= 5
         ? Math.round(opt.avatarConcurrency) : merged.options.avatarConcurrency,
+      imageRetryCount: typeof opt.imageRetryCount === 'number' && opt.imageRetryCount >= 0 && opt.imageRetryCount <= 5
+        ? Math.round(opt.imageRetryCount) : merged.options.imageRetryCount,
     };
   }
 

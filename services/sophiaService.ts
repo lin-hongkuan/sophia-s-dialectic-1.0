@@ -231,7 +231,44 @@ const releaseAvatarSlot = (): void => {
   }
 };
 
-const callAvatarImage = async (prompt: string): Promise<string> => {
+class ImageGenerationError extends Error {
+  status?: number;
+  retryable: boolean;
+
+  constructor(message: string, options: { status?: number; retryable?: boolean } = {}) {
+    super(message);
+    this.name = 'ImageGenerationError';
+    this.status = options.status;
+    this.retryable = options.retryable ?? true;
+  }
+}
+
+const isRetryableImageStatus = (status: number): boolean =>
+  status === 408 || status === 429 || status >= 500;
+
+const computeImageRetryDelayMs = (retryIndex: number): number => {
+  const base = 1000 * Math.pow(2, retryIndex);
+  const jitter = Math.floor(Math.random() * 500);
+  return Math.min(base + jitter, 10000);
+};
+
+const waitForImageRetry = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) {
+    reject(new DOMException('aborted by caller', 'AbortError'));
+    return;
+  }
+  const timeoutId = setTimeout(() => {
+    signal?.removeEventListener('abort', onAbort);
+    resolve();
+  }, ms);
+  const onAbort = () => {
+    clearTimeout(timeoutId);
+    reject(new DOMException('aborted by caller', 'AbortError'));
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
+
+const callAvatarImageRequest = async (prompt: string, signal?: AbortSignal): Promise<string> => {
   await acquireAvatarSlot();
   try {
     const cfg = getActiveConfig();
@@ -245,10 +282,13 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
         size: cfg.avatarImageSize,
         response_format: 'b64_json',
       }),
-    }, { timeoutMs: 120000, label: 'avatar-image', signal: effectiveSignal(currentRunContext()) });
+    }, { timeoutMs: 120000, maxAttempts: 1, label: 'avatar-image', signal });
 
     if (!response.ok) {
-      throw new Error(await apiErrorMessage(response));
+      throw new ImageGenerationError(await apiErrorMessage(response), {
+        status: response.status,
+        retryable: isRetryableImageStatus(response.status),
+      });
     }
 
     const data = await response.json().catch(() => ({} as any));
@@ -264,6 +304,47 @@ const callAvatarImage = async (prompt: string): Promise<string> => {
   } finally {
     releaseAvatarSlot();
   }
+};
+
+const callAvatarImage = async (prompt: string): Promise<string> => {
+  const signal = effectiveSignal(currentRunContext());
+  const retryCount = Math.max(0, Math.round(getActiveConfig().options.imageRetryCount));
+  const maxAttempts = retryCount + 1;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (signal?.aborted) throw new DOMException('aborted by caller', 'AbortError');
+
+    try {
+      if (attempt > 0) {
+        emitLog({
+          level: 'detail',
+          stage: 'avatar',
+          message: `图片生成重试中：${attempt}/${retryCount}。`,
+        });
+      }
+      return await callAvatarImageRequest(prompt, signal);
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+
+      const retryable = !(error instanceof ImageGenerationError) || error.retryable;
+      const isLastAttempt = attempt === maxAttempts - 1;
+      if (!retryable || isLastAttempt) throw error;
+
+      const delay = computeImageRetryDelayMs(attempt);
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[sophia][avatar-image] image generation failed on attempt ${attempt + 1}/${maxAttempts}; retrying in ${delay}ms: ${reason}`);
+      emitLog({
+        level: 'warn',
+        stage: 'avatar',
+        message: `图片生成失败，准备重试：${attempt + 1}/${retryCount}。`,
+      });
+      await waitForImageRetry(delay, signal);
+    }
+  }
+
+  throw lastError ?? new Error('[sophia][avatar-image] image generation retries exhausted');
 };
 
 export const buildThoughtVoiceAvatarPrompt = (
@@ -2171,8 +2252,9 @@ ${trimmedSeedTopic ? `用户当前输入或兴趣：${trimmedSeedTopic}` : '用�
 
 要求：
 - 每个问题 8-22 个中文字符左右，必须以问号结尾。
-- 空输入时，每个问题都必须是可被哲学史长期讨论的根本问题，像“自由意志存在吗？”、“列车难题到底如何解？”、“知识是从哪里来的？”。
+- 空输入时，每个问题都必须是可被哲学史长期讨论的根本问题。
 - 问题要具体、有张力、普通人也愿意点击。
+- 
 - 不要重复首页已有问题；如果用户给了当前兴趣，围绕它生成更尖锐的变体。
 - 不要输出解释。
 - 每个问题都要涉及不同方面。

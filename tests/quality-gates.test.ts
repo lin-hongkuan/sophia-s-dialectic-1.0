@@ -193,6 +193,27 @@ test('normalizes analysis profile settings defensively', () => {
   resetToDefaults();
 });
 
+test('normalizes image retry option defensively', () => {
+  resetToDefaults();
+  assert.equal(getActiveConfig().options.imageRetryCount, 2);
+
+  importSettings(JSON.stringify({
+    options: {
+      imageRetryCount: 4,
+    },
+  }));
+  assert.equal(getActiveConfig().options.imageRetryCount, 4);
+  assert.equal(JSON.parse(exportSettings()).options.imageRetryCount, 4);
+
+  importSettings(JSON.stringify({
+    options: {
+      imageRetryCount: 9,
+    },
+  }));
+  assert.equal(getActiveConfig().options.imageRetryCount, 2);
+  resetToDefaults();
+});
+
 test('exports token accounting csv defensively', () => {
   clearAll();
   recordUsage({

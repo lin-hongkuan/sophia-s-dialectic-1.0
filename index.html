@@ -99,10 +99,30 @@
         ];
 
         var SVG_NS = 'http://www.w3.org/2000/svg';
-        var QUADRANTS = ['nw', 'ne', 'sw', 'se'];
-        var LABELS = { nw: 'A', ne: 'B', sw: 'C', se: 'D' };
-        var VIEWBOX = { nw: '0 0 256 256', ne: '256 0 256 256', sw: '0 256 256 256', se: '256 256 256 256' };
-        var TONES = { nw: '#2C2A26', ne: '#3D3932', sw: '#5B5246', se: '#746B5E' };
+        var TILE_SIZE = 512 / 3;
+        var TILES = [
+          { id: 'r1c1', label: 'A', row: 0, col: 0, tone: '#2C2A26' },
+          { id: 'r1c2', label: 'B', row: 0, col: 1, tone: '#34312C' },
+          { id: 'r1c3', label: 'C', row: 0, col: 2, tone: '#3D3932' },
+          { id: 'r2c1', label: 'D', row: 1, col: 0, tone: '#4A443C' },
+          { id: 'r2c2', label: 'E', row: 1, col: 1, tone: '#524B42' },
+          { id: 'r2c3', label: 'F', row: 1, col: 2, tone: '#5B5246' },
+          { id: 'r3c1', label: 'G', row: 2, col: 0, tone: '#665D51' },
+          { id: 'r3c2', label: 'H', row: 2, col: 1, tone: '#6E665A' },
+          { id: 'r3c3', label: 'I', row: 2, col: 2, tone: '#746B5E' }
+        ];
+        var QUADRANTS = TILES.map(function (tile) { return tile.id; });
+        var LABELS = {};
+        var VIEWBOX = {};
+        var TONES = {};
+        TILES.forEach(function (tile) {
+          var x = Number((tile.col * TILE_SIZE).toFixed(4));
+          var y = Number((tile.row * TILE_SIZE).toFixed(4));
+          var size = Number(TILE_SIZE.toFixed(4));
+          LABELS[tile.id] = tile.label;
+          VIEWBOX[tile.id] = [x, y, size, size].join(' ');
+          TONES[tile.id] = tile.tone;
+        });
         var state = { idx: -1, artifact: null, pieces: [], selected: null, done: false, streak: 0 };
 
         function pickArtifact() {
@@ -193,7 +213,7 @@
             else meta.removeAttribute('data-done');
           }
           if (era) {
-            era.textContent = state.done ? state.artifact.era : (state.pieces.filter(function (p) { return p.placed; }).length + '/4');
+            era.textContent = state.done ? state.artifact.era : (state.pieces.filter(function (p) { return p.placed; }).length + '/' + QUADRANTS.length);
             if (state.done) era.setAttribute('data-done', 'true');
             else era.removeAttribute('data-done');
           }

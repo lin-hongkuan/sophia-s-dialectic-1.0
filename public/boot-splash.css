@@ -144,7 +144,7 @@ body { background: #F9F8F6; color: #2C2A26; }
   border: 1.5px solid #A89F91;
   border-radius: 2px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   background: linear-gradient(135deg, #F9F8F6 0%, #ECE3D1 100%);
   box-shadow: 0 12px 40px -12px rgba(44,42,38,0.12), inset 0 1px 0 rgba(255,255,255,0.6);
@@ -199,7 +199,7 @@ body { background: #F9F8F6; color: #2C2A26; }
   width: min(320px, 80vw);
   margin-top: 0.75rem;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.45rem;
 }
 #boot-game .bg-piece {
@@ -212,10 +212,15 @@ body { background: #F9F8F6; color: #2C2A26; }
   overflow: hidden;
   transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
-#boot-game .bg-piece[data-piece="nw"] { background: linear-gradient(135deg, #F9F8F6, #E6E2D8); }
-#boot-game .bg-piece[data-piece="ne"] { background: linear-gradient(135deg, #F9F8F6, #E8E0D2); }
-#boot-game .bg-piece[data-piece="sw"] { background: linear-gradient(135deg, #F9F8F6, #E2DDD4); }
-#boot-game .bg-piece[data-piece="se"] { background: linear-gradient(135deg, #F9F8F6, #DDD8CE); }
+#boot-game .bg-piece[data-piece="r1c1"] { background: linear-gradient(135deg, #F9F8F6, #E6E2D8); }
+#boot-game .bg-piece[data-piece="r1c2"] { background: linear-gradient(135deg, #F9F8F6, #E8E0D2); }
+#boot-game .bg-piece[data-piece="r1c3"] { background: linear-gradient(135deg, #F9F8F6, #E2DDD4); }
+#boot-game .bg-piece[data-piece="r2c1"] { background: linear-gradient(135deg, #F9F8F6, #E0D9CB); }
+#boot-game .bg-piece[data-piece="r2c2"] { background: linear-gradient(135deg, #F9F8F6, #DDD8CE); }
+#boot-game .bg-piece[data-piece="r2c3"] { background: linear-gradient(135deg, #F9F8F6, #DAD3C6); }
+#boot-game .bg-piece[data-piece="r3c1"] { background: linear-gradient(135deg, #F9F8F6, #E4DDD0); }
+#boot-game .bg-piece[data-piece="r3c2"] { background: linear-gradient(135deg, #F9F8F6, #DFD8CC); }
+#boot-game .bg-piece[data-piece="r3c3"] { background: linear-gradient(135deg, #F9F8F6, #D8D1C5); }
 #boot-game .bg-piece:hover,
 #boot-game .bg-piece[data-selected="true"] {
   transform: translateY(-2px) scale(1.03);
