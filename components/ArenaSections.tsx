@@ -1,6 +1,7 @@
 import React from 'react';
-import { ArrowRight, BookOpen, ChevronDown, ChevronUp, FlaskConical, LayoutGrid, Layers, MessageSquare, Stethoscope } from 'lucide-react';
-import { AnalysisResult } from '../types';
+import { ArrowRight, BookOpen, ChevronDown, ChevronUp, FlaskConical, ImageOff, LayoutGrid, Layers, MessageSquare, Stethoscope } from 'lucide-react';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
+import { AnalysisResult, MagazineImageAsset, MagazineImageSlot } from '../types';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
 
 export const modeIcon: Record<string, React.ReactNode> = {
@@ -20,6 +21,109 @@ const FrameNode: React.FC<{ label: string; text: string; emphasis?: boolean }> =
     </p>
   </div>
 );
+
+const FailedImagePlaceholder: React.FC<{ label: string; message?: string; dark?: boolean; className?: string }> = ({ label, message, dark = false, className = '' }) => {
+  const aspectClass = className.includes('aspect-') ? '' : 'aspect-[16/10]';
+
+  return (
+    <div
+      className={`flex ${aspectClass} w-full flex-col items-center justify-center border p-5 text-center ${
+        dark
+          ? 'border-museum-700 bg-museum-800/45 text-museum-100'
+          : 'border-amber-200/80 bg-amber-50/80 text-amber-900'
+      } ${className}`}
+      role="status"
+    >
+      <ImageOff className={`mb-3 h-6 w-6 ${dark ? 'text-museum-200' : 'text-amber-800'}`} />
+      <p className="font-serif text-lg leading-tight">{label}</p>
+      <p className={`mt-2 max-w-sm text-xs leading-relaxed ${dark ? 'text-museum-300' : 'text-amber-900/82'}`}>
+        {message || GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE}
+      </p>
+    </div>
+  );
+};
+
+const magazineSlotCopy: Record<MagazineImageSlot, { eyebrow: string; title: string; caption: string; failed: string; pending: string }> = {
+  cover: {
+    eyebrow: 'Opening Plate',
+    title: '进入这篇文章之前',
+    caption: 'A generated editorial plate for the central question.',
+    failed: '开篇插图暂不可用',
+    pending: '正在补齐开篇插图',
+  },
+  conclusion: {
+    eyebrow: 'Closing Plate',
+    title: '把分歧带回现实',
+    caption: 'A generated closing plate for the synthesis.',
+    failed: '收束插图暂不可用',
+    pending: '正在补齐收束插图',
+  },
+};
+
+const MagazineImageFrame: React.FC<{ image?: MagazineImageAsset; slot: MagazineImageSlot }> = ({ image, slot }) => {
+  const copy = magazineSlotCopy[slot];
+
+  if (image?.imageUrl) {
+    return (
+      <figure className="overflow-hidden border border-museum-200 bg-museum-100 shadow-sm">
+        <div className="relative aspect-[4/3] overflow-hidden bg-museum-100 md:aspect-[16/9]">
+          <img
+            src={image.imageUrl}
+            alt={image.alt || copy.title}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(44,42,38,0.05),transparent_38%,rgba(44,42,38,0.12))]" aria-hidden="true" />
+        </div>
+        <figcaption className="flex flex-col gap-1 border-t border-museum-200 bg-white/82 px-4 py-3 text-[10px] uppercase text-museum-400 sm:flex-row sm:items-center sm:justify-between">
+          <span>{copy.eyebrow}</span>
+          <span>{copy.caption}</span>
+        </figcaption>
+      </figure>
+    );
+  }
+
+  if (image?.status === 'failed') {
+    return <FailedImagePlaceholder label={copy.failed} message={image.error} className="aspect-[4/3] md:aspect-[16/9]" />;
+  }
+
+  return (
+    <div className="flex aspect-[4/3] w-full flex-col items-center justify-center border border-museum-200 bg-white/60 p-5 text-center shadow-sm md:aspect-[16/9]" role="status">
+      <div className="mb-4 h-8 w-8 animate-pulse border border-museum-300 bg-museum-100" aria-hidden="true" />
+      <p className="font-serif text-lg text-museum-900">{copy.pending}</p>
+      <p className="mt-2 max-w-sm text-xs leading-relaxed text-museum-500">正在生成图像，请稍候。</p>
+    </div>
+  );
+};
+
+export const MagazineImageSection: React.FC<{ data: AnalysisResult; slot: MagazineImageSlot }> = ({ data, slot }) => {
+  const copy = magazineSlotCopy[slot];
+  const image = data.magazineImages?.[slot];
+  const supportingText = slot === 'cover'
+    ? data.questionFrame.bigQuestion || data.introduction
+    : data.conclusion.openQuestion || data.conclusion.realLifeReturn || data.conclusion.summary;
+
+  if (slot === 'conclusion' && !data.conclusion.summary) return null;
+
+  return (
+    <section className="mx-auto mb-7 max-w-6xl md:mb-16">
+      <div className={`grid grid-cols-1 gap-4 md:gap-6 lg:items-stretch ${slot === 'cover' ? 'lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]' : 'lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]'}`}>
+        <div className={slot === 'conclusion' ? 'lg:order-2' : ''}>
+          <MagazineImageFrame image={image} slot={slot} />
+        </div>
+        <aside className="flex min-h-[220px] flex-col justify-between border border-museum-200 bg-white/82 p-5 shadow-sm md:p-8">
+          <div>
+            <p className="text-[10px] uppercase text-museum-400">{copy.eyebrow}</p>
+            <h2 className="mt-4 font-serif text-2xl leading-tight text-museum-900 md:text-4xl">{copy.title}</h2>
+            <p className="mt-5 text-museum-700 leading-loose">{supportingText}</p>
+          </div>
+          <div className="mt-7 h-px w-24 bg-museum-300" aria-hidden="true" />
+        </aside>
+      </div>
+    </section>
+  );
+};
 
 export const QuestionMapSection: React.FC<{ data: AnalysisResult }> = ({ data }) => (
   <section className="max-w-6xl mx-auto mb-7 md:mb-16 bg-white/80 backdrop-blur-md border border-museum-200 shadow-sm overflow-hidden">
@@ -213,6 +317,15 @@ export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data })
                 />
                 <figcaption className="px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-museum-300">Generated Scene</figcaption>
               </figure>
+            ) : data.thoughtExperiment.sceneImage?.status === 'failed' ? (
+              <figure className="mb-6 overflow-hidden border border-museum-700 bg-museum-800/40">
+                <FailedImagePlaceholder
+                  dark
+                  label="场景图暂不可用"
+                  message={data.thoughtExperiment.sceneImage.error}
+                />
+                <figcaption className="px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-museum-300">Scene Placeholder</figcaption>
+              </figure>
             ) : null}
             {data.thoughtExperiment.poeticVersion && <p className="font-serif font-light text-xl leading-loose tracking-wide mb-6">{data.thoughtExperiment.poeticVersion}</p>}
             <p className="text-museum-100 leading-loose whitespace-pre-line">{data.thoughtExperiment.unsettlingVersion}</p>
@@ -234,6 +347,15 @@ export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data })
                   />
                 </div>
                 <figcaption className="mt-2 text-[10px] uppercase tracking-[0.2em] text-museum-300">Pressure Sketch</figcaption>
+              </figure>
+            ) : data.thoughtExperiment.pressureImage?.status === 'failed' ? (
+              <figure className="mt-auto pt-6">
+                <FailedImagePlaceholder
+                  className="aspect-[16/9]"
+                  label="挑战配图暂不可用"
+                  message={data.thoughtExperiment.pressureImage.error}
+                />
+                <figcaption className="mt-2 text-[10px] uppercase tracking-[0.2em] text-museum-300">Pressure Placeholder</figcaption>
               </figure>
             ) : null}
           </div>
@@ -376,6 +498,8 @@ export const SynthesisSection: React.FC<{ data: AnalysisResult }> = ({ data }) =
           </div>
         </div>
       )}
+
+      <MagazineImageSection data={data} slot="conclusion" />
 
       {data.conclusion.summary && (
         <div className="bg-museum-900 text-museum-50 shadow-lg p-5 md:p-12">

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { analyzeTopic, createPartialResult, resumeAnalysis } from '../services/sophiaService';
 import {
   ActiveAnalysisRun,
@@ -40,17 +40,25 @@ export const useAnalysisRun = ({
 }: UseAnalysisRunOptions) => {
   const [activeRun, setActiveRun] = useState<ActiveAnalysisRun | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const activeRunRef = useRef<ActiveAnalysisRun | null>(null);
   const lastRunContextRef = useRef<{ topic: string; continuationContext?: ContinuationContext; isPresetRegeneration?: boolean } | null>(null);
   const activeRunControlRef = useRef<RunControlHandle | null>(null);
   const pendingPlannedVoicesRef = useRef<ThoughtVoice[]>([]);
+  const pendingMagazineImagesRef = useRef<NonNullable<AnalysisResult['magazineImages']>>({});
 
   const activeRunIsRunning = activeRun?.status === 'starting' || activeRun?.status === 'running';
+
+  useEffect(() => {
+    activeRunRef.current = activeRun;
+  }, [activeRun]);
 
   const updateActiveRun = useCallback((runId: string, updater: (run: ActiveAnalysisRun) => ActiveAnalysisRun) => {
     if (activeRunIdRef.current !== runId) return;
     setActiveRun((current) => {
       if (!current || current.runId !== runId) return current;
-      return updater(current);
+      const next = updater(current);
+      activeRunRef.current = next;
+      return next;
     });
   }, []);
 
@@ -95,14 +103,23 @@ export const useAnalysisRun = ({
         onProgress: (progress: ActiveAnalysisRun['progress']) => updateActiveRun(runId, (run) => ({ ...run, status: progress.stage === 'done' ? run.status : 'running', progress })),
         onOutline: (outline: Parameters<typeof createPartialResult>[0]) => updateActiveRun(runId, (run) => {
           const pendingPlannedVoices = pendingPlannedVoicesRef.current;
+          const pendingMagazineImages = pendingMagazineImagesRef.current;
           pendingPlannedVoicesRef.current = [];
+          pendingMagazineImagesRef.current = {};
           const partialResult = createPartialResult(outline);
           const existingIds = new Set(partialResult.voices.map((voice) => voice.id));
           const voices = [
             ...partialResult.voices,
             ...pendingPlannedVoices.filter((voice) => !existingIds.has(voice.id)),
           ];
-          const next: ActiveAnalysisRun = { ...run, status: 'running', result: { ...partialResult, voices }, error: null };
+          const nextResult: AnalysisResult = {
+            ...partialResult,
+            voices,
+            magazineImages: Object.keys(pendingMagazineImages).length > 0
+              ? { ...(partialResult.magazineImages || {}), ...pendingMagazineImages }
+              : partialResult.magazineImages,
+          };
+          const next: ActiveAnalysisRun = { ...run, status: 'running', result: nextResult, error: null };
           writeRunSnapshot(next, 'outline', continuationContext);
           return next;
         }),
@@ -167,6 +184,27 @@ export const useAnalysisRun = ({
           writeRunSnapshot(next, checkpointStageForProgress(run.progress), continuationContext);
           return next;
         }),
+        onMagazineImage: (slot, image) => updateActiveRun(runId, (run) => {
+          if (!run.result) {
+            pendingMagazineImagesRef.current = {
+              ...pendingMagazineImagesRef.current,
+              [slot]: image,
+            };
+            return run;
+          }
+          const next: ActiveAnalysisRun = {
+            ...run,
+            result: {
+              ...run.result,
+              magazineImages: {
+                ...(run.result.magazineImages || {}),
+                [slot]: image,
+              },
+            },
+          };
+          writeRunSnapshot(next, checkpointStageForProgress(run.progress), continuationContext);
+          return next;
+        }),
         onError: (message: string) => updateActiveRun(runId, (run) => ({ ...run, status: 'error', error: message, progress: progressForRunFailure(message) })),
         onLog: (entry: GenerationLogEntry) => updateActiveRunWithSnapshot(runId, (run) => appendRunLog(run, entry), continuationContext),
         onTokenUsage: (usage: TokenUsage) => recordTokenUsage(usage),
@@ -175,15 +213,31 @@ export const useAnalysisRun = ({
   }, [updateActiveRun, updateActiveRunWithSnapshot, writeRunSnapshot]);
 
   const completeRun = useCallback((runId: string, data: AnalysisResult, isPresetRegeneration?: boolean) => {
+    const existingMagazineImages = activeRunRef.current?.runId === runId
+      ? activeRunRef.current.result?.magazineImages
+      : undefined;
+    const pendingMagazineImages = pendingMagazineImagesRef.current;
+    const mergedMagazineImages = {
+      ...(existingMagazineImages || {}),
+      ...pendingMagazineImages,
+      ...(data.magazineImages || {}),
+    };
+    const completedResult: AnalysisResult = Object.keys(mergedMagazineImages).length > 0
+      ? {
+        ...data,
+        magazineImages: mergedMagazineImages,
+      }
+      : data;
+    pendingMagazineImagesRef.current = {};
     updateActiveRun(runId, (run) => ({
       ...run,
       status: 'completed',
-      result: data,
-      progress: progressForCompletedResult({ result: data }),
+      result: completedResult,
+      progress: progressForCompletedResult({ result: completedResult }),
       error: null,
     }));
     void deleteRunSnapshot(runId);
-    onRunComplete(data, isPresetRegeneration);
+    onRunComplete(completedResult, isPresetRegeneration);
   }, [onRunComplete, updateActiveRun]);
 
   const failRun = useCallback((runId: string, err: unknown, continuationContext?: ContinuationContext) => {
@@ -212,10 +266,11 @@ export const useAnalysisRun = ({
     const runId = createRunId();
     const createdAt = new Date().toISOString();
     pendingPlannedVoicesRef.current = [];
+    pendingMagazineImagesRef.current = {};
     activeRunIdRef.current = runId;
     lastRunContextRef.current = { topic: trimmedTopic, continuationContext, isPresetRegeneration };
     onRunOpen(trimmedTopic);
-    setActiveRun({
+    const initialRun: ActiveAnalysisRun = {
       runId,
       topic: trimmedTopic,
       createdAt,
@@ -230,7 +285,9 @@ export const useAnalysisRun = ({
       error: null,
       isPresetRegeneration,
       log: [],
-    });
+    };
+    activeRunRef.current = initialRun;
+    setActiveRun(initialRun);
 
     void saveRunSnapshot({
       runId,
@@ -270,10 +327,11 @@ export const useAnalysisRun = ({
 
     const { runId, topic: snapTopic, continuationContext, isPresetRegeneration } = snap;
     pendingPlannedVoicesRef.current = [];
+    pendingMagazineImagesRef.current = {};
     activeRunIdRef.current = runId;
     lastRunContextRef.current = { topic: snapTopic, continuationContext, isPresetRegeneration };
     onRunOpen(snapTopic);
-    setActiveRun({
+    const resumedRun: ActiveAnalysisRun = {
       runId,
       topic: snapTopic,
       createdAt: snap.createdAt,
@@ -283,7 +341,9 @@ export const useAnalysisRun = ({
       error: null,
       isPresetRegeneration,
       log: snap.log,
-    });
+    };
+    activeRunRef.current = resumedRun;
+    setActiveRun(resumedRun);
 
     const { throttle, callbacks } = buildCallbacks(runId, continuationContext);
 

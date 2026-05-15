@@ -25,6 +25,7 @@ const formatTime = (iso: string): string => {
 const stageTagText = (entry: GenerationLogEntry): string => {
   if (entry.stage === 'meta') return 'meta';
   if (entry.stage === 'reframe') return 'reframe';
+  if (entry.stage === 'avatar') return '图像生成';
   return STAGE_LABEL[entry.stage as keyof typeof STAGE_LABEL] || entry.stage;
 };
 

@@ -7,6 +7,8 @@ import {
   GenerationLogEntry,
   GenerationProgress,
   KeywordExplainer,
+  MagazineImageAsset,
+  MagazineImageSlot,
   Message,
   OpenConclusion,
   ProgramMode,
@@ -55,6 +57,7 @@ import {
   requestHeaders,
   type ChatMessage,
 } from './apiClient';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
 
@@ -242,6 +245,13 @@ class ImageGenerationError extends Error {
     this.retryable = options.retryable ?? true;
   }
 }
+
+const imageGenerationFailureMessage = (error: unknown): string => {
+  if (error instanceof Error && error.name === 'AbortError') return '图像生成已取消。';
+  return GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE;
+};
+
+const isAbortError = (error: unknown): boolean => error instanceof Error && error.name === 'AbortError';
 
 const isRetryableImageStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
@@ -1075,6 +1085,130 @@ export const generateThoughtExperimentSceneImage = async (
   );
 };
 
+const buildFailedThoughtExperimentImage = (
+  outline: Pick<AnalysisOutline, 'philosophical_title'>,
+  variant: 'scene' | 'pressure',
+  error: unknown,
+): ThoughtExperimentImage => ({
+  imageUrl: '',
+  prompt: '',
+  model: getActiveConfig().avatarImageModel,
+  alt: variant === 'pressure'
+    ? `${outline.philosophical_title} 的核心挑战配图暂不可用`
+    : `${outline.philosophical_title} 的思想实验场景图暂不可用`,
+  generatedAt: new Date().toISOString(),
+  status: 'failed',
+  error: imageGenerationFailureMessage(error),
+});
+
+const magazineSlotLabel: Record<MagazineImageSlot, string> = {
+  cover: 'Opening Plate',
+  conclusion: 'Closing Plate',
+};
+
+const buildMagazineImagePrompt = (result: AnalysisResult, slot: MagazineImageSlot): string => {
+  const cfg = getActiveConfig();
+  const keywords = result.keywords.map((keyword) => keyword.term).filter(Boolean).slice(0, 6).join(', ') || 'none';
+  const tensions = result.tensions.map((tension) => `${tension.title}: ${tension.content}`).filter(Boolean).slice(0, 3).join('\n') || 'none';
+  const voices = result.voices
+    .filter((voice) => voice.status !== 'failed')
+    .map((voice) => `${voice.name}: ${voice.oneLine || voice.stance}`)
+    .filter(Boolean)
+    .slice(0, 5)
+    .join('\n') || 'none';
+  const slotInstruction = slot === 'cover'
+    ? 'Opening image: a strong magazine feature opener for the question, visualizing the central tension before the reader enters the voices.'
+    : 'Closing image: a reflective final plate for the synthesis, visualizing unresolved tension and a return to ordinary life.';
+
+  return [
+    'Create a refined philosophy magazine editorial image for a Chinese long-form analysis.',
+    slotInstruction,
+    'No readable text, no Chinese characters, no subtitles, no typography, no logos, no UI.',
+    'Style: museum-editorial, quiet but vivid, sophisticated composition, realistic symbolic objects, tactile paper-and-light atmosphere, restrained colors, not fantasy art.',
+    'Composition: try for a horizontal editorial spread with generous negative space, but keep the central subject complete enough to survive responsive cropping. If the image model chooses a different fixed ratio, prioritize a complete, elegant magazine plate over exact aspect ratio.',
+    `Configured image hint: ${cfg.avatarAspectHint}.`,
+    `User question: ${result.topic}`,
+    `Feature title: ${result.philosophical_title}`,
+    `Analytical mode: ${result.modeLabel}`,
+    `Introduction: ${result.introduction}`,
+    `Keywords: ${keywords}`,
+    `Thought voices:\n${voices}`,
+    `Tensions:\n${tensions}`,
+    slot === 'conclusion'
+      ? `Conclusion: ${result.conclusion.summary}\nOpen question: ${result.conclusion.openQuestion}\nReturn to life: ${result.conclusion.realLifeReturn}`
+      : '',
+  ].filter(Boolean).join('\n');
+};
+
+const buildFailedMagazineImage = (result: AnalysisResult, slot: MagazineImageSlot, error: unknown): MagazineImageAsset => ({
+  imageUrl: '',
+  prompt: '',
+  model: getActiveConfig().avatarImageModel,
+  alt: `${result.philosophical_title} 的${slot === 'cover' ? '开篇' : '收束'}杂志插图暂不可用`,
+  generatedAt: new Date().toISOString(),
+  status: 'failed',
+  error: imageGenerationFailureMessage(error),
+});
+
+export const generateMagazineImage = async (
+  result: AnalysisResult,
+  slot: MagazineImageSlot,
+): Promise<MagazineImageAsset> => {
+  const cfg = getActiveConfig();
+  const prompt = buildMagazineImagePrompt(result, slot);
+  const existingCtx = currentRunContext();
+  const standaloneCtx = existingCtx
+    ? null
+    : pushRunContext({
+      stage: 'avatar',
+      onTokenUsage: (usage) => recordUsageStandalone(usage),
+    });
+  const label = magazineSlotLabel[slot];
+
+  try {
+    return await withStage('avatar', async () => {
+      emitLog({ level: 'info', stage: 'avatar', message: `${label} 杂志配图开始生成。` });
+      return withStageCache<MagazineImageAsset>(
+        'avatar',
+        {
+          kind: `magazine-${slot}`,
+          promptVersion: 1,
+          prompt,
+          model: cfg.avatarImageModel,
+          size: cfg.avatarImageSize,
+          aspect: cfg.avatarAspectHint,
+        },
+        async () => {
+          const imageUrl = await callAvatarImage(prompt);
+          emitLog({ level: 'info', stage: 'avatar', message: `${label} 杂志配图已生成，将随文章展示。` });
+          return {
+            imageUrl,
+            prompt,
+            model: cfg.avatarImageModel,
+            alt: `${result.philosophical_title} 的${slot === 'cover' ? '开篇' : '收束'}杂志插图`,
+            generatedAt: new Date().toISOString(),
+            status: 'completed',
+          };
+        },
+        {
+          onHit: () => emitLog({
+            level: 'detail',
+            stage: 'avatar',
+            message: `${label} 杂志配图命中阶段缓存，复用上次图像。`,
+          }),
+        },
+      );
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    console.warn(`[sophia] magazine image generation failed: ${slot}`, error);
+    emitLog({ level: 'warn', stage: 'avatar', message: `${label} 杂志配图生成失败：${imageGenerationFailureMessage(error)}` });
+    return buildFailedMagazineImage(result, slot, error);
+  } finally {
+    if (standaloneCtx) popRunContext(standaloneCtx);
+  }
+};
+
 const generateVoiceEssay = async (
   topic: string,
   outline: AnalysisOutline,
@@ -1083,17 +1217,19 @@ const generateVoiceEssay = async (
   onStep?: (message: string) => void,
 ): Promise<ThoughtVoice> => {
   onStep?.(`voice pipeline started · text stream + avatar image jobs launched in parallel.`);
+  type AvatarJobResult = { avatar?: ThoughtVoiceImageAvatar; avatarError?: string };
   const avatarPromise = withStage(
     'avatar',
     () => generateThoughtVoiceAvatar(topic, outline, voicePlan),
     { voiceId: voicePlan.id, voiceName: voicePlan.name },
-  ).then((avatar) => {
+  ).then((avatar): AvatarJobResult => {
     emitLog({ level: 'detail', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像已完成。` });
-    return avatar;
-  }).catch((error) => {
+    return { avatar };
+  }).catch((error): AvatarJobResult => {
+    const avatarError = imageGenerationFailureMessage(error);
     console.warn(`[sophia] 思想声音头像生成失败：${voicePlan.name}`, error);
-    emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像生成失败，将使用占位。` });
-    return undefined;
+    emitLog({ level: 'warn', stage: 'voices', voiceId: voicePlan.id, voiceName: voicePlan.name, message: `${voicePlan.name} 思想头像生成失败：${avatarError}` });
+    return { avatarError };
   });
 
   // We cache the (argument + summary) pair under the 'voice' kind. The avatar
@@ -1186,8 +1322,8 @@ const generateVoiceEssay = async (
     void putStageEntry('voice', voiceCacheKey, { argument, summary });
   }
 
-    onStep?.(`waiting on avatar job result for ${voicePlan.name}...`);
-  const avatar = await avatarPromise;
+  onStep?.(`waiting on avatar job result for ${voicePlan.name}...`);
+  const { avatar, avatarError } = await avatarPromise;
 
   return {
     id: voicePlan.id,
@@ -1207,6 +1343,7 @@ const generateVoiceEssay = async (
     challenges: Array.isArray(summary.challenges) ? summary.challenges : [],
     summaryForSynthesis: summary.summaryForSynthesis || voicePlan.stance,
     avatar,
+    avatarError,
     status: 'completed',
   };
 };
@@ -1878,21 +2015,52 @@ export const analyzeTopic = async (
     emitLog({ level: 'info', stage: 'outline', message: `问题图谱已成形 · 分析路径：${outline.modeLabel}（计划 ${outline.voicePlans.length} 位思想声音）。` });
 
     let result = createPartialResult(outline);
+    let magazineImages: AnalysisResult['magazineImages'] = {};
+    const rememberMagazineImage = (slot: MagazineImageSlot, image: MagazineImageAsset) => {
+      magazineImages = { ...magazineImages, [slot]: image };
+      callbacks.onMagazineImage?.(slot, image);
+    };
+    const runMagazineImageJob = async (baseResult: AnalysisResult, slot: MagazineImageSlot): Promise<MagazineImageAsset> => {
+      try {
+        const image = await generateMagazineImage(baseResult, slot);
+        rememberMagazineImage(slot, image);
+        return image;
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        console.warn(`[sophia] magazine image job failed unexpectedly: ${slot}`, error);
+        emitLog({ level: 'warn', stage: 'avatar', message: `${magazineSlotLabel[slot]} 杂志配图生成失败：${imageGenerationFailureMessage(error)}` });
+        const image = buildFailedMagazineImage(baseResult, slot, error);
+        rememberMagazineImage(slot, image);
+        return image;
+      }
+    };
+    const coverImagePromise = runMagazineImageJob(result, 'cover');
+    void coverImagePromise.catch(() => {});
     const sceneImagePromise = outline.thoughtExperiment
       ? withStage('avatar', () => Promise.all([
-        generateThoughtExperimentSceneImage(userTopic, outline, 'scene'),
-        generateThoughtExperimentSceneImage(userTopic, outline, 'pressure'),
+        generateThoughtExperimentSceneImage(userTopic, outline, 'scene')
+          .catch((error) => {
+            console.warn('[sophia] 思想实验场景图生成失败', error);
+            emitLog({ level: 'warn', stage: 'avatar', message: `思想实验场景图生成失败：${imageGenerationFailureMessage(error)}` });
+            return buildFailedThoughtExperimentImage(outline, 'scene', error);
+          }),
+        generateThoughtExperimentSceneImage(userTopic, outline, 'pressure')
+          .catch((error) => {
+            console.warn('[sophia] 核心挑战配图生成失败', error);
+            emitLog({ level: 'warn', stage: 'avatar', message: `核心挑战配图生成失败：${imageGenerationFailureMessage(error)}` });
+            return buildFailedThoughtExperimentImage(outline, 'pressure', error);
+          }),
       ]))
         .then(([sceneImage, pressureImage]) => {
           const images = { sceneImage: sceneImage || undefined, pressureImage: pressureImage || undefined };
           if (sceneImage || pressureImage) callbacks.onThoughtExperimentImage?.(images);
-          if (sceneImage) emitLog({ level: 'info', stage: 'avatar', message: '思想实验场景图已生成，将随结果展示。' });
-          if (pressureImage) emitLog({ level: 'info', stage: 'avatar', message: '核心挑战配图已生成，将填充右侧留白。' });
+          if (sceneImage?.status === 'completed') emitLog({ level: 'info', stage: 'avatar', message: '思想实验场景图已生成，将随结果展示。' });
+          if (pressureImage?.status === 'completed') emitLog({ level: 'info', stage: 'avatar', message: '核心挑战配图已生成，将填充右侧留白。' });
           return images;
         })
         .catch((error) => {
           console.warn('[sophia] 思想实验配图生成失败', error);
-          emitLog({ level: 'warn', stage: 'avatar', message: '思想实验配图生成失败，文本分析不受影响。' });
+          emitLog({ level: 'warn', stage: 'avatar', message: `思想实验配图生成失败：${imageGenerationFailureMessage(error)}` });
           return null;
         })
       : Promise.resolve(null);
@@ -2126,13 +2294,11 @@ export const analyzeTopic = async (
     callbacks.onSynthesis?.(synthesis);
     emitLog({ level: 'info', stage: 'synthesis', message: `synthesis JSON normalized · tensions=${synthesis.tensions.length}, keywords=${synthesis.keywords.length}, followUps=${synthesis.followUps.length}.` });
 
-    const totalTokens = tokenUsage.reduce((sum, entry) => sum + entry.totalTokens, 0);
-    const thoughtExperimentImages = await sceneImagePromise;
     // Merge: any voice in completedVoices that isn't in result.voices' placeholders
     // (e.g., user-inserted) gets appended at the end.
     const placeholderIds = new Set(result.voices.map((v) => v.id));
     const insertedVoices = completedVoices.filter((v) => !placeholderIds.has(v.id));
-    result = {
+    const resultWithSynthesis: AnalysisResult = {
       ...result,
       voices: [
         ...result.voices.map((placeholder) => completedVoices.find((voice) => voice.id === placeholder.id) || placeholder),
@@ -2142,9 +2308,22 @@ export const analyzeTopic = async (
       keywords: normalizeKeywords(synthesis.keywords),
       followUps: normalizeFollowUps(synthesis.followUps),
       conclusion: normalizeConclusion(synthesis.conclusion),
-      thoughtExperiment: result.thoughtExperiment && thoughtExperimentImages
-        ? { ...result.thoughtExperiment, ...thoughtExperimentImages }
-        : result.thoughtExperiment,
+    };
+    const conclusionImagePromise = runMagazineImageJob(resultWithSynthesis, 'conclusion');
+    const [thoughtExperimentImages] = await Promise.all([
+      sceneImagePromise,
+      coverImagePromise,
+      conclusionImagePromise,
+    ]);
+    const totalTokens = tokenUsage.reduce((sum, entry) => sum + entry.totalTokens, 0);
+    result = {
+      ...resultWithSynthesis,
+      thoughtExperiment: resultWithSynthesis.thoughtExperiment && thoughtExperimentImages
+        ? { ...resultWithSynthesis.thoughtExperiment, ...thoughtExperimentImages }
+        : resultWithSynthesis.thoughtExperiment,
+      magazineImages: Object.keys(magazineImages).length > 0
+        ? { ...(resultWithSynthesis.magazineImages || {}), ...magazineImages }
+        : resultWithSynthesis.magazineImages,
       metadata: { tokenUsage, totalTokens },
     };
 
@@ -2473,7 +2652,13 @@ export const regenerateVoiceAvatar = async (
       },
     );
     const prompt = `${basePrompt}\nRegen variant token (do NOT render): ${nonce}`;
-    const imageUrl = await callAvatarImage(prompt);
+    let imageUrl: string;
+    try {
+      imageUrl = await callAvatarImage(prompt);
+    } catch (error) {
+      console.warn(`[sophia] 重新生成头像失败：${voice.name}`, error);
+      throw new Error(imageGenerationFailureMessage(error));
+    }
     return {
       imageUrl,
       prompt,

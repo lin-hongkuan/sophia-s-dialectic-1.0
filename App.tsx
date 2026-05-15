@@ -22,6 +22,7 @@ import { useAnalysisRun } from './hooks/useAnalysisRun';
 import { useHistoryLibrary } from './hooks/useHistoryLibrary';
 import { useAppRouting } from './hooks/useAppRouting';
 import { useResultMutations } from './hooks/useResultMutations';
+import { useMagazineImageGeneration } from './hooks/useMagazineImageGeneration';
 
 type SelectedSource = 'active' | 'history' | null;
 
@@ -185,6 +186,18 @@ const App: React.FC = () => {
     persistResult,
     persistGeneratedPreset,
     createRunId: makeRunId,
+  });
+  useMagazineImageGeneration({
+    displayedResult,
+    selectedSource,
+    activeRun,
+    activeRunIsRunning,
+    presetEntry,
+    historyEntries,
+    setActiveRun,
+    setSelectedHistoryResult,
+    persistResult,
+    persistGeneratedPreset,
   });
   const mainRef = useMainFocus(!!reframeState?.open || announcementOpen, [announcementOpen, reframeState?.open, selectedSource, view]);
   const showHome = view === 'home';

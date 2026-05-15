@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnalysisResult, ThoughtVoice } from '../types';
-import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, ImageOff, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
 import VoiceChatModal from './VoiceChatModal';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
 
 interface ThoughtVoiceCardProps {
   data: ThoughtVoice;
@@ -101,6 +102,8 @@ const QUOTE_PAIRS: Array<[string, string]> = [
 
 const QUOTE_EDGE_CHARS = '「」『』“”‘’\"\'';
 const quoteEdgePattern = new RegExp(`^[${QUOTE_EDGE_CHARS}]+|[${QUOTE_EDGE_CHARS}]+$`, 'g');
+const CJK_INITIALS_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/u;
+const AVATAR_IMAGE_LOAD_FALLBACK_MESSAGE = '头像图像加载失败，已使用符号占位。';
 
 const normalizeQuoteText = (value?: string) => {
   if (!value) return '';
@@ -154,6 +157,19 @@ const getInitials = (name: string) => {
   const compact = cleaned.replace(/\s+/g, '');
   const initials = Array.from(compact).slice(0, 2).join('');
   return initials ? initials.toUpperCase() : '∴';
+};
+
+const getSymbolicInitialsClassName = (initials: string) =>
+  CJK_INITIALS_PATTERN.test(initials)
+    ? 'font-sans text-[1.35rem] leading-none sm:text-2xl md:text-3xl lg:text-5xl xl:text-6xl'
+    : 'font-serif text-2xl leading-none sm:text-4xl md:text-5xl lg:text-7xl xl:text-8xl';
+
+const getAvatarFallbackMessage = (voice: ThoughtVoice, imageLoadFailed: boolean) => {
+  if (voice.avatarError !== undefined) {
+    return voice.avatarError.trim() || GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE;
+  }
+
+  return imageLoadFailed ? AVATAR_IMAGE_LOAD_FALLBACK_MESSAGE : '';
 };
 
 const getEraLabel = (voice: ThoughtVoice) => {
@@ -213,6 +229,10 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
   const isReversed = index % 2 === 1;
   const statusLabel = isQueued ? '排队中' : isGenerating ? '正在展开' : data.status === 'completed' ? '已完成' : '失败';
   const normalizedQuote = normalizeQuoteText(data.quote);
+  const avatarFallbackMessage = avatar.type === 'symbolic'
+    ? getAvatarFallbackMessage(data, avatarFailed)
+    : '';
+  const symbolicAvatarLabel = avatarFallbackMessage ? `${avatar.title} ${avatarFallbackMessage}` : avatar.title;
 
   useEffect(() => {
     const updatePreviewHeight = () => setPreviewHeight(window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
@@ -311,18 +331,23 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
               />
             ) : (
               <div
-                className="relative w-full h-full flex items-center justify-center"
+                className="relative w-full h-full overflow-hidden flex items-center justify-center"
                 role="img"
-                aria-label={avatar.title}
-                title={avatar.title}
+                aria-label={symbolicAvatarLabel}
+                title={symbolicAvatarLabel}
                 style={{ background: avatar.background, color: avatar.foreground }}
               >
-                <span className="absolute inset-[7px] border border-white/55" aria-hidden="true" />
-                <span className="absolute top-3 right-3 text-lg font-serif opacity-40" aria-hidden="true">{avatar.symbol}</span>
-                <span className="relative z-10 font-serif text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight" aria-hidden="true">{avatar.initials}</span>
-                <span className="absolute bottom-2.5 left-1/2 -translate-x-1/2 bg-white/60 px-2 py-0.5 text-[9px] font-mono tracking-[0.18em] text-museum-800" aria-hidden="true">
-                  {avatar.eraLabel}
-                </span>
+                <span className="absolute inset-0 bg-[radial-gradient(circle_at_32%_24%,rgba(255,255,255,0.88),transparent_34%),radial-gradient(circle_at_72%_78%,rgba(44,42,38,0.12),transparent_35%)]" aria-hidden="true" />
+                <span className="absolute inset-[7px] hidden border border-white/65 shadow-[inset_0_0_0_1px_rgba(44,42,38,0.08)] lg:block" aria-hidden="true" />
+                <span className="absolute inset-x-7 top-1/2 hidden h-px -translate-y-1/2 bg-museum-900/10 lg:block" aria-hidden="true" />
+                <span className="absolute inset-y-7 left-1/2 hidden w-px -translate-x-1/2 bg-museum-900/10 lg:block" aria-hidden="true" />
+                <span className="absolute top-3 right-3 hidden font-serif text-xl opacity-35 lg:block xl:text-2xl" aria-hidden="true">{avatar.symbol}</span>
+                <span className={`relative z-10 flex max-w-[78%] items-center justify-center text-center font-bold text-museum-900/90 drop-shadow-[0_8px_20px_rgba(44,42,38,0.16)] ${getSymbolicInitialsClassName(avatar.initials)}`} aria-hidden="true">{avatar.initials}</span>
+                {!avatarFallbackMessage && (
+                  <span className="absolute bottom-3 left-1/2 hidden -translate-x-1/2 border border-white/60 bg-white/60 px-2.5 py-1 text-[9px] font-mono uppercase text-museum-800 backdrop-blur-[2px] lg:block" aria-hidden="true">
+                    {avatar.eraLabel}
+                  </span>
+                )}
               </div>
             )}
             {onRegenerateAvatar && data.status === 'completed' && (
@@ -348,6 +373,16 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
             )}
           </div>
         </div>
+
+        {avatarFallbackMessage && (
+          <div
+            className="mt-3 flex items-start gap-2 border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[11px] leading-relaxed text-amber-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]"
+            role="status"
+          >
+            <ImageOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{avatarFallbackMessage}</span>
+          </div>
+        )}
 
         <p className="mt-4 md:mt-6 border-l border-museum-300/90 pl-3 md:pl-4 text-base md:text-xl font-serif font-light text-museum-700 leading-loose tracking-wide">
           {data.oneLine || data.stance || data.coreConcept}

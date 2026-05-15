@@ -1,5 +1,5 @@
 import type { AnalysisResult, HistoryEntry } from '../types';
-import { buildAvatarKey, buildSceneImageKey, getAvatarImages, putAvatarImage } from './imageStore';
+import { buildAvatarKey, buildMagazineImageKey, buildSceneImageKey, getAvatarImages, putAvatarImage } from './imageStore';
 import { createLocalJsonStore, safeLocalStorageGet, safeLocalStorageSet } from './localStorageGateway';
 
 export const HISTORY_KEY = 'sophia.history.v1';
@@ -44,6 +44,22 @@ const stripThoughtExperimentImage = (
   return { ...image, imageUrl: '' };
 };
 
+const stripMagazineImages = (
+  entryId: string,
+  magazineImages: AnalysisResult['magazineImages'] | undefined,
+  images: StoredImage[],
+): AnalysisResult['magazineImages'] | undefined => {
+  if (!magazineImages) return magazineImages;
+  const next: AnalysisResult['magazineImages'] = { ...magazineImages };
+  (Object.keys(next) as Array<keyof NonNullable<AnalysisResult['magazineImages']>>).forEach((slot) => {
+    const image = next[slot];
+    if (!image?.imageUrl?.startsWith('data:')) return;
+    images.push({ key: buildMagazineImageKey(entryId, slot), imageUrl: image.imageUrl });
+    next[slot] = { ...image, imageUrl: '' };
+  });
+  return next;
+};
+
 export const splitAvatarsForStorage = (
   entry: HistoryEntry,
 ): { lean: HistoryEntry; images: Array<{ key: string; imageUrl: string }> } => {
@@ -66,9 +82,26 @@ export const splitAvatarsForStorage = (
           pressureImage: stripThoughtExperimentImage(entry.id, entry.result.thoughtExperiment.pressureImage, 'pressure', images),
         }
         : entry.result.thoughtExperiment,
+      magazineImages: stripMagazineImages(entry.id, entry.result.magazineImages, images),
     },
   };
   return { lean, images };
+};
+
+const mergeMagazineImagesFromStore = (
+  entryId: string,
+  magazineImages: AnalysisResult['magazineImages'] | undefined,
+  imageMap: Record<string, string>,
+): AnalysisResult['magazineImages'] | undefined => {
+  if (!magazineImages) return magazineImages;
+  const next: AnalysisResult['magazineImages'] = { ...magazineImages };
+  (Object.keys(next) as Array<keyof NonNullable<AnalysisResult['magazineImages']>>).forEach((slot) => {
+    const image = next[slot];
+    if (!image || image.imageUrl) return;
+    const url = imageMap[buildMagazineImageKey(entryId, slot)];
+    if (url) next[slot] = { ...image, imageUrl: url };
+  });
+  return next;
 };
 
 export const mergeAvatarsFromStore = (
@@ -102,6 +135,7 @@ export const mergeAvatarsFromStore = (
           : entry.result.thoughtExperiment.pressureImage,
       }
       : entry.result.thoughtExperiment,
+    magazineImages: mergeMagazineImagesFromStore(entry.id, entry.result.magazineImages, imageMap),
   },
 });
 
@@ -111,6 +145,10 @@ export const collectAvatarKeys = (entry: HistoryEntry): string[] => {
     .map((voice) => buildAvatarKey(entry.id, voice.id));
   if (entry.result.thoughtExperiment?.sceneImage) keys.push(buildSceneImageKey(entry.id, 'scene'));
   if (entry.result.thoughtExperiment?.pressureImage) keys.push(buildSceneImageKey(entry.id, 'pressure'));
+  if (entry.result.magazineImages) {
+    (Object.keys(entry.result.magazineImages) as Array<keyof NonNullable<AnalysisResult['magazineImages']>>)
+      .forEach((slot) => keys.push(buildMagazineImageKey(entry.id, slot)));
+  }
   return keys;
 };
 
@@ -134,6 +172,13 @@ export const hydrateEntriesWithAvatars = async (entries: HistoryEntry[]): Promis
     }
     if (entry.result.thoughtExperiment?.pressureImage && !entry.result.thoughtExperiment.pressureImage.imageUrl) {
       keys.push(buildSceneImageKey(entry.id, 'pressure'));
+    }
+    if (entry.result.magazineImages) {
+      (Object.keys(entry.result.magazineImages) as Array<keyof NonNullable<AnalysisResult['magazineImages']>>)
+        .forEach((slot) => {
+          const image = entry.result.magazineImages?.[slot];
+          if (image && !image.imageUrl) keys.push(buildMagazineImageKey(entry.id, slot));
+        });
     }
   });
   if (keys.length === 0) return entries;
@@ -199,7 +244,8 @@ export const maybeMigrateLegacyAvatars = async (): Promise<void> => {
   const preset = loadGeneratedPreset();
   const all = preset ? [preset, ...entries] : entries;
   const hasInline = all.some((entry) =>
-    entry.result.voices.some((voice) => voice.avatar?.imageUrl?.startsWith('data:')),
+    entry.result.voices.some((voice) => voice.avatar?.imageUrl?.startsWith('data:'))
+      || Object.values(entry.result.magazineImages || {}).some((image) => image?.imageUrl?.startsWith('data:')),
   );
   if (hasInline) {
     await Promise.all(all.map(persistEntryAvatars));

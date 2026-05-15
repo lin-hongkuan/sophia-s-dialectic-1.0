@@ -7,6 +7,7 @@ import { validateUserPrompt, ValidationMode } from '../utils/inputValidation';
 import { HangingLabel } from './PageHero';
 import {
   ConceptNotesSection,
+  MagazineImageSection,
   ModeSpecificFrames,
   ProgramStructureSection,
   QuestionMapSection,
@@ -181,6 +182,8 @@ const Arena: React.FC<ArenaProps> = ({ data, onReset, onFollowUp, onAppendThough
           </div>
         )}
       </div>
+
+      <MagazineImageSection data={data} slot="cover" />
 
       <QuestionMapSection data={data} />
 

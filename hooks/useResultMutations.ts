@@ -2,6 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from 'react';
 import { appendThoughtVoice, regenerateThoughtVoice, regenerateVoiceAvatar } from '../services/sophiaService';
 import { recordUsage as recordTokenUsage } from '../services/tokenAccounting';
 import { PRELOADED_HISTORY_ENTRY } from '../data/preloadedHistory';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
 import { createVoiceStreamThrottle } from '../utils/voiceStreamThrottle';
 import { pushRoute, type View } from '../utils/routing';
 import type { ActiveAnalysisRun, AnalysisResult, HistoryEntry } from '../types';
@@ -163,7 +164,7 @@ export const useResultMutations = ({
 
     applyResultUpdate((result) => ({
       ...result,
-      voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating', error: undefined, argument: '', summaryForSynthesis: '' } : voice),
+      voices: result.voices.map((voice) => voice.id === voiceId ? { ...voice, status: 'generating', error: undefined, avatarError: undefined, argument: '', summaryForSynthesis: '' } : voice),
     }));
 
     const throttle = createVoiceStreamThrottle((vid, fullText) => {
@@ -177,7 +178,7 @@ export const useResultMutations = ({
       const updatedResult = await regenerateThoughtVoice(sourceResult, voiceId, {
         onVoiceStart: (vid) => applyResultUpdate((result) => ({
           ...result,
-          voices: result.voices.map((voice) => voice.id === vid ? { ...voice, status: 'generating', error: undefined } : voice),
+          voices: result.voices.map((voice) => voice.id === vid ? { ...voice, status: 'generating', error: undefined, avatarError: undefined } : voice),
         })),
         onVoiceDelta: (vid, _delta, fullText) => throttle.schedule(vid, fullText),
         onVoiceStep: (vid) => throttle.flush(vid),
@@ -222,7 +223,7 @@ export const useResultMutations = ({
       const avatar = await regenerateVoiceAvatar(sourceResult, voiceId);
       const updatedResult: AnalysisResult = {
         ...sourceResult,
-        voices: sourceResult.voices.map((voice) => voice.id === voiceId ? { ...voice, avatar } : voice),
+        voices: sourceResult.voices.map((voice) => voice.id === voiceId ? { ...voice, avatar, avatarError: undefined } : voice),
       };
       if (sourceResult !== baseResult) {
         setSelectedHistoryResult(updatedResult);
@@ -236,6 +237,21 @@ export const useResultMutations = ({
       }
     } catch (error) {
       console.error('[Sophia] regenerate avatar failed:', error);
+      const message = error instanceof Error ? error.message : GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE;
+      const updatedResult: AnalysisResult = {
+        ...sourceResult,
+        voices: sourceResult.voices.map((voice) => voice.id === voiceId ? { ...voice, avatarError: message } : voice),
+      };
+      if (sourceResult !== baseResult) {
+        setSelectedHistoryResult(updatedResult);
+      } else {
+        updateDisplayedResult(() => updatedResult);
+      }
+      if (sourceResult.id === presetEntry.result.id) {
+        persistGeneratedPreset(updatedResult);
+      } else {
+        persistResult(updatedResult);
+      }
     } finally {
       setRegeneratingAvatarVoiceId(null);
     }

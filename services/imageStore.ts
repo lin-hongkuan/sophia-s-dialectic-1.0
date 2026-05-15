@@ -32,6 +32,9 @@ export const buildAvatarKey = (entryId: string, voiceId: string): string =>
 export const buildSceneImageKey = (entryId: string, variant = 'scene'): string =>
   `${entryId}::thought-experiment-${variant}`;
 
+export const buildMagazineImageKey = (entryId: string, slot: string): string =>
+  `${entryId}::magazine-${slot}`;
+
 export const putAvatarImage = async (key: string, imageUrl: string): Promise<void> => {
   if (!imageUrl) return;
   await store.put(key, imageUrl);

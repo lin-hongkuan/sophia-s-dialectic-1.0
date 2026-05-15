@@ -68,7 +68,22 @@ export interface ThoughtExperimentImage {
   alt: string;
   generatedAt?: string;
   status?: 'completed' | 'failed';
+  error?: string;
 }
+
+export type MagazineImageSlot = 'cover' | 'conclusion';
+
+export interface MagazineImageAsset {
+  imageUrl: string;
+  prompt: string;
+  model: string;
+  alt: string;
+  generatedAt?: string;
+  status?: 'completed' | 'failed';
+  error?: string;
+}
+
+export type MagazineImageMap = Partial<Record<MagazineImageSlot, MagazineImageAsset>>;
 
 export interface ThoughtExperimentFrame {
   poeticVersion?: string;
@@ -111,6 +126,7 @@ export interface ThoughtVoice {
   challenges?: string[];
   summaryForSynthesis: string;
   avatar?: ThoughtVoiceImageAvatar;
+  avatarError?: string;
   status?: VoiceStatus;
   error?: string;
   addedByUserPrompt?: string;
@@ -182,6 +198,7 @@ export interface AnalysisResult {
   seminarMatrix?: SeminarAxis;
   diagnosisFrame?: DiagnosisFrame;
   thoughtExperiment?: ThoughtExperimentFrame;
+  magazineImages?: MagazineImageMap;
   conclusion: OpenConclusion;
   reasoning_trace?: string[];
   metadata?: AnalysisMetadata;
@@ -285,6 +302,7 @@ export interface AnalyzeCallbacks {
   onVoiceComplete?: (voice: ThoughtVoice) => void;
   onSynthesis?: (partial: Pick<AnalysisResult, 'tensions' | 'keywords' | 'followUps' | 'conclusion'>) => void;
   onThoughtExperimentImage?: (images: Partial<Pick<ThoughtExperimentFrame, 'sceneImage' | 'pressureImage'>>) => void;
+  onMagazineImage?: (slot: MagazineImageSlot, image: MagazineImageAsset) => void;
   onError?: (message: string) => void;
   /** Each emit lands as a row in the GenerationLogPanel. */
   onLog?: (entry: GenerationLogEntry) => void;
