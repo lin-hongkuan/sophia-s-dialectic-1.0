@@ -1,17 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { analyzeTopic, createPartialResult, resumeAnalysis } from '../services/sophiaService';
-import {
-  ActiveAnalysisRun,
-  AnalysisResult,
-  ContinuationContext,
-  GenerationLogEntry,
-  RunControlHandle,
-  RunSnapshot,
-  RunSnapshotStage,
-  ThoughtVoice,
-  TokenUsage,
-  VoiceInsertSeed,
-} from '../types';
+import type { AnalysisResult, ThoughtVoice } from '../types/domain';
+import type { ContinuationContext, GenerationLogEntry, RunControlHandle, TokenUsage, VoiceInsertSeed } from '../types/pipeline';
+import type { ActiveAnalysisRun, RunSnapshot, RunSnapshotStage } from '../types/storage';
 import {
   appendRunLog,
   buildRunSnapshotPayload,
@@ -23,7 +14,7 @@ import {
 import { checkpointStageForProgress } from '../utils/generationLog';
 import { createVoiceStreamThrottle } from '../utils/voiceStreamThrottle';
 import { recordUsage as recordTokenUsage } from '../services/tokenAccounting';
-import { deleteRunSnapshot, saveRunSnapshot } from '../services/runSnapshotStore';
+import { deleteRunSnapshot, saveRunSnapshot } from '../services/storage/runSnapshotStore';
 
 interface UseAnalysisRunOptions {
   createRunId: () => string;

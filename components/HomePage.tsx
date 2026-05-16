@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowRight, Info, Sparkles } from 'lucide-react';
-import type { ActiveAnalysisRun, RunSnapshot } from '../types';
+import type { ActiveAnalysisRun, RunSnapshot } from '../types/storage';
 import ActiveRunBanner from './ActiveRunBanner';
 import { HangingLabel } from './PageHero';
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight, BookOpen, ChevronDown, ChevronUp, FlaskConical, ImageOff, LayoutGrid, Layers, MessageSquare, Stethoscope } from 'lucide-react';
-import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
-import { AnalysisResult, MagazineImageAsset, MagazineImageSlot } from '../types';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../presentation/imageMessages';
+import type { AnalysisResult, MagazineImageAsset, MagazineImageSlot } from '../types/domain';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
 
 export const modeIcon: Record<string, React.ReactNode> = {

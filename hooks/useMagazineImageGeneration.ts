@@ -1,6 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { generateMagazineImage } from '../services/sophiaService';
-import type { ActiveAnalysisRun, AnalysisResult, HistoryEntry, MagazineImageAsset, MagazineImageSlot } from '../types';
+import type { AnalysisResult, MagazineImageAsset, MagazineImageSlot } from '../types/domain';
+import type { ActiveAnalysisRun, HistoryEntry } from '../types/storage';
 
 type SelectedSource = 'active' | 'history' | null;
 

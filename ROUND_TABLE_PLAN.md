@@ -212,7 +212,7 @@ type RoundtableTurnKind =
 
 ## 6. Data Model
 
-新增类型建议放在 `types.ts`。
+新增类型建议放在 `types/domain.ts`。
 
 ```ts
 export type RoundtableSessionStatus =
@@ -321,7 +321,7 @@ export interface RoundtableSession {
 roundtable::<sessionId>::participant::<participantId>
 ```
 
-可以在 `services/imageStore.ts` 增加：
+可以在 `services/storage/imageStore.ts` 增加：
 
 ```ts
 export const buildRoundtableAvatarKey = (sessionId: string, participantId: string): string =>

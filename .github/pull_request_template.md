@@ -18,6 +18,8 @@
 
 ## 自测清单
 
+- [ ] `npm test` 通过
+- [ ] `npm run typecheck` 通过
 - [ ] `npm run build` 通过
 - [ ] 本地 dev 启动后，关键路径手验通过：
   - [ ] 首页输入并提交，正常进入生成（含 reframe 流程）

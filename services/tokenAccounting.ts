@@ -8,7 +8,7 @@
  * dropped on write to bound localStorage growth.
  */
 
-import type { TokenUsage, TokenUsageStage } from '../types';
+import type { TokenUsage, TokenUsageStage } from '../types/pipeline';
 
 const STORAGE_KEY = 'sophia.tokens.v1';
 const MAX_RECORDS = 1000;

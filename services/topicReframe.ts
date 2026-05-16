@@ -12,7 +12,7 @@ import { getActiveConfig } from './sophiaConfig';
 import { resolveTopicReframeSystemPrompt } from './prompts';
 import { buildUsage, recordUsage } from './tokenAccounting';
 import { parseModelJson } from './jsonResponse';
-import { extractChatCompletionContent, parseChatCompletionResponseText } from './apiClient';
+import { extractChatCompletionContent, parseChatCompletionResponseText } from './api/apiClient';
 
 export interface ReframeCandidate {
   title: string;

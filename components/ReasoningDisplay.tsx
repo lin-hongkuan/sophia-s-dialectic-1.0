@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, BrainCircuit, Search, BookOpen, Scale, CheckCircle2, Circle, ChevronDown, Hammer } from 'lucide-react';
-import { GenerationLogEntry, GenerationProgress } from '../types';
-import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import type { GenerationLogEntry, GenerationProgress } from '../types/pipeline';
+import { STAGE_LABEL, STAGE_ORDER } from '../presentation/generationStages';
 import { estimateGenerationProgress, formatElapsedTime } from '../utils/generationProgress';
 import GenerationLogPanel from './GenerationLogPanel';
 import RubbingGame from './RubbingGame';

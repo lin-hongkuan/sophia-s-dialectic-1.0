@@ -1,30 +1,4 @@
-import { GenerationProgress, ProgramMode } from './types';
-
-/**
- * Single source of truth for generation-stage labels and ordering.
- * Previously duplicated in ReasoningDisplay.tsx, HistoryPage.tsx, ActiveRunBanner.tsx —
- * inconsistent wording (e.g. "等待"/"等待提问", "出错"/"遇到错误") drifted between them.
- */
-export const STAGE_LABEL: Record<GenerationProgress['stage'], string> = {
-  idle: '等待提问',
-  outline: '整理问题结构',
-  route: '生成论证路线',
-  voices: '生成思想声音',
-  synthesis: '综合判断',
-  done: '完成',
-  error: '遇到错误',
-};
-
-export const STAGE_ORDER: GenerationProgress['stage'][] = [
-  'outline',
-  'route',
-  'voices',
-  'synthesis',
-  'done',
-];
-
-export const GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE =
-  'Grok 上游负载过高，暂时无法提供图像服务。已使用符号占位，正文分析不受影响。';
+import type { ProgramMode } from '../types/domain';
 
 /**
  * Per-mode presentation copy for the live generation surface (RoundtableScene).
@@ -36,7 +10,7 @@ export const GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE =
  * panel during generation. This map gives each mode a consistent eyebrow,
  * title fallback, item label, queued/done chip text, table-question label,
  * synthesis verb, and empty-state copy. Keep the keys aligned with
- * ProgramMode in types.ts.
+ * ProgramMode in types/domain.ts.
  */
 export interface ModePresentation {
   /** Tiny uppercase eyebrow at the very top of the live card. */

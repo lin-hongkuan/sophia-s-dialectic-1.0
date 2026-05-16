@@ -5,7 +5,7 @@
 1. 安装依赖
 
 ```bash
-npm install
+npm ci
 ```
 
 2. 配置 `.env.local`
@@ -15,6 +15,8 @@ SOPHIA_API_KEY=your_key_here
 SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
 SOPHIA_API_MODEL=gpt-5.4-mini
 SOPHIA_IMAGE_MODEL=grok-imagine-image-lite
+SOPHIA_IMAGE_SIZE=1024x1024
+SOPHIA_IMAGE_ASPECT_HINT=portrait 1:1.2 aspect ratio
 SOPHIA_API_PROVIDER=OpenAI-compatible
 ```
 
@@ -98,7 +100,7 @@ services/
 data/
   preloadedHistory.ts    # 预置参考样本
 App.tsx                  # 主应用与渐进生成流程
-types.ts                 # 结果模型与生成进度类型
+types/domain.ts                 # 结果模型与生成进度类型
 vite.config.ts           # Vite 环境变量与本地代理配置
 ```
 

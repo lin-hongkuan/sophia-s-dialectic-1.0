@@ -130,8 +130,10 @@ npm run dev
 | `npm run build` | 构建到 `dist/`，并把 `dist/index.html` 复制为 `dist/404.html`（GH Pages SPA 回退）。 |
 | `npm run preview` | 在 `127.0.0.1:7878` 预览生产构建，仍走本地 API 代理。 |
 | `npm test` | 运行 `tsx --test` 的最小质量门，覆盖 routing、输入校验、生成日志等纯函数。 |
+| `npm run typecheck` | 运行 `tsc --noEmit`。 |
+| `npm run verify` | 依次运行 test、typecheck、build。 |
 
-本地交付前建议至少跑 `npm test` + `npm run build`；涉及 UI 的改动还应启动 `npm run dev` 或 `npm run preview` 做浏览器手验。
+本地交付前建议至少跑 `npm run verify`；涉及 UI 的改动还应启动 `npm run dev` 或 `npm run preview` 做浏览器手验。
 
 ---
 
@@ -357,7 +359,7 @@ export const ANNOUNCEMENT: Announcement = {
 
 ## 部署到 GitHub Pages
 
-仓库已经包含 `.github/workflows/deploy.yml`：每次 push 到 `main` 或手动 dispatch，会执行 Node 20 → `npm ci` → `npm run build` → 上传 `dist/` → `actions/deploy-pages`。
+仓库已经包含 `.github/workflows/deploy.yml`：每次 push 到 `main` 或手动 dispatch，会执行 Node 20 → `npm ci` → `npm run build` → 上传 `dist/` → `actions/deploy-pages`。PR 和 `main` push 还会经过 `.github/workflows/ci.yml` 的 test、typecheck、build 质量门。
 
 ### 1. 配置 GitHub Secret
 
@@ -428,8 +430,8 @@ Settings 页"自定义 LLM"里填的 key 也以**明文**存放在用户自己�
 ├── index.tsx                        # ReactDOM.createRoot 入口
 ├── index.html                       # Tailwind CDN、字体、import map、boot splash
 ├── index.css                        # 全局动画、滚动、滚动条、selection
-├── types.ts                         # 全部数据形态声明
-├── constants.ts                     # STAGE_LABEL / STAGE_ORDER 等共享常量
+├── types/domain.ts                         # 全部数据形态声明
+├── presentation/generationStages.ts                     # STAGE_LABEL / STAGE_ORDER 等共享常量
 ├── tailwind.config.js               # museum 调色板与字体扩展
 ├── postcss.config.js
 ├── tsconfig.json
@@ -495,14 +497,14 @@ Settings 页"自定义 LLM"里填的 key 也以**明文**存放在用户自己�
 
 ### 加一个新的分析路径（mode）
 
-1. `types.ts` 给 `ProgramMode` 加新值。
+1. `types/domain.ts` 给 `ProgramMode` 加新值。
 2. `services/prompts.ts` 给 `MODE_LABELS` 加中文标签，并在 `outlineSystemPrompt` 的"可选分析路径"列表里加一行说明。
 3. `components/Arena.tsx` 给 `modeIcon` 配 lucide-react 图标。
-4. 如果该 mode 需要专有渲染区域（像 `seminarMatrix` / `diagnosisFrame` / `thoughtExperiment`），在 `types.ts` 加新字段，在 `Arena.tsx` 加对应 section。
+4. 如果该 mode 需要专有渲染区域（像 `seminarMatrix` / `diagnosisFrame` / `thoughtExperiment`），在 `types/domain.ts` 加新字段，在 `Arena.tsx` 加对应 section。
 
 ### 加一个新的思想声音类型（voiceKind）
 
-1. `types.ts` 给 `VoiceKind` 加新值。
+1. `types/domain.ts` 给 `VoiceKind` 加新值。
 2. `services/prompts.ts#VOICE_KIND_AVATAR_SUBJECT` 加描述，告诉头像生成器画什么。
 3. `components/ThoughtVoiceCard.tsx#kindLabel` / `VOICE_KIND_SYMBOL` 加映射。
 

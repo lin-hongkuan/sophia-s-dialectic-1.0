@@ -13,13 +13,13 @@ import {
   checkpointStageForProgress,
   GENERATION_LOG_LIMIT,
 } from '../utils/generationLog.ts';
-import { isStageEntryUsable, STAGE_TTL_MS } from '../services/stageCache.ts';
-import { compareRunSnapshotsByUpdatedAtDesc, isResumableRunSnapshot } from '../services/runSnapshotStore.ts';
+import { isStageEntryUsable, STAGE_TTL_MS } from '../services/storage/stageCache.ts';
+import { compareRunSnapshotsByUpdatedAtDesc, isResumableRunSnapshot } from '../services/storage/runSnapshotStore.ts';
 import { DEFAULT_ANALYSIS_PROFILE, exportSettings, importSettings, getActiveConfig, resetToDefaults } from '../services/sophiaConfig.ts';
 import { buildAnalysisProfileInstruction } from '../services/analysisProfile.ts';
 import { clearAll, exportCsv, flushNow, recordUsage } from '../services/tokenAccounting.ts';
-import { extractChatCompletionContent, parseChatCompletionResponseText } from '../services/apiClient.ts';
-import type { RunSnapshot } from '../types.ts';
+import { extractChatCompletionContent, parseChatCompletionResponseText } from '../services/api/apiClient.ts';
+import type { RunSnapshot } from '../types/storage.ts';
 
 const makeSnapshot = (partial: Partial<RunSnapshot>): RunSnapshot => ({
   runId: partial.runId || 'run',

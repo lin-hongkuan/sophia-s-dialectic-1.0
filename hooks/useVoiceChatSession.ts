@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AnalysisResult, Message, ThoughtVoice } from '../types';
+import type { AnalysisResult, ThoughtVoice } from '../types/domain';
+import type { Message } from '../types/chat';
 import { chatWithVoice } from '../services/sophiaService';
-import { clearVoiceChat, loadVoiceChat, saveVoiceChat } from '../services/voiceChatStore';
+import { clearVoiceChat, loadVoiceChat, saveVoiceChat } from '../services/storage/voiceChatStore';
 
 interface UseVoiceChatSessionOptions {
   open: boolean;

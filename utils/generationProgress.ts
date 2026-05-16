@@ -1,5 +1,6 @@
-import { STAGE_LABEL } from '../constants';
-import { AnalysisResult, GenerationLogEntry, GenerationProgress } from '../types';
+import { STAGE_LABEL } from '../presentation/generationStages';
+import type { AnalysisResult } from '../types/domain';
+import type { GenerationLogEntry, GenerationProgress } from '../types/pipeline';
 
 export type ProgressConfidence = 'low' | 'medium' | 'high';
 

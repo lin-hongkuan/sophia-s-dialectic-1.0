@@ -1,4 +1,4 @@
-import type { AnalysisResult } from '../types';
+import type { AnalysisResult } from '../types/domain';
 
 const clean = (value?: string | null) => (value || '').trim();
 const controlCharsPattern = new RegExp('[\\u0000-\\u001f]', 'g');

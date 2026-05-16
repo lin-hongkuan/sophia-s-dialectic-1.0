@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Localized API error messages: `401` → "API key 无效或过期"; `403` → "该 key 无该模型权限"; `404` → "模型名错误或服务未上线"; `429` → "配额或限流"; `5xx` → "上游服务波动"; etc.
 - Extracted all system prompts to `services/prompts.ts`; outline / voice / synthesis prompts updated for off-topic reframe handling, anti-hallucination, and tighter tension targeting.
 - `services/sophiaService.ts` no longer freezes API config at module load; each request resolves the active config from the runtime store, with env values as fallback.
-- Stage labels (`STAGE_LABEL` / `STAGE_ORDER`) extracted to `constants.ts`, reused by `ReasoningDisplay`, `HistoryPage`, `ActiveRunBanner`.
+- Stage labels (`STAGE_LABEL` / `STAGE_ORDER`) extracted to `presentation/generationStages.ts`, reused by `ReasoningDisplay`, `HistoryPage`, `ActiveRunBanner`.
 - Random IDs use `crypto.randomUUID()` with a `Math.random()` fallback for older browsers.
 - Manifesto background pattern moved from a CN-blocked `transparenttextures.com` URL to an inline SVG noise.
 

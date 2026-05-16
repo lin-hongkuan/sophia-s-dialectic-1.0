@@ -7,7 +7,7 @@
  * keeping this module free of any config / storage dependency.
  */
 
-import type { ProgramMode, VoiceKind } from '../types';
+import type { ProgramMode, VoiceKind } from '../types/domain';
 
 export interface PromptOverrides {
   outlineSystem?: string;

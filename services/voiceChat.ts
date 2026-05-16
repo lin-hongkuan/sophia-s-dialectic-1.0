@@ -1,4 +1,4 @@
-import { AnalysisResult, ThoughtVoice } from '../types';
+import type { AnalysisResult, ThoughtVoice } from '../types/domain';
 
 const truncate = (value: string | undefined, max: number): string => {
   if (!value) return '';

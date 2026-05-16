@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AnalysisResult, HistoryEntry, RunSnapshot } from '../types';
+import { emptyConclusion, type AnalysisResult } from '../types/domain';
+import type { HistoryEntry, RunSnapshot } from '../types/storage';
 import { PRELOADED_HISTORY_ENTRY } from '../data/preloadedHistory';
 import { downloadJsonFile } from '../utils/download';
 import {
@@ -16,10 +17,70 @@ import {
   PRESET_HISTORY_KEY,
   saveHistory,
   splitAvatarsForStorage,
-} from '../services/historyStore';
-import { deleteAvatarImages } from '../services/imageStore';
-import { deleteRunSnapshot, findMostRecentResumable, pruneStaleRunSnapshots } from '../services/runSnapshotStore';
-import { safeLocalStorageSet } from '../services/localStorageGateway';
+} from '../services/storage/historyStore';
+import { deleteAvatarImages } from '../services/storage/imageStore';
+import { deleteRunSnapshot, findMostRecentResumable, pruneStaleRunSnapshots } from '../services/storage/runSnapshotStore';
+import { safeLocalStorageSet } from '../services/storage/localStorageGateway';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const safeString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' && value.trim() ? value : fallback;
+
+const safeStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
+const normalizeImportedResult = (result: AnalysisResult): AnalysisResult => {
+  const source = result as Partial<AnalysisResult>;
+  const questionFrame: Record<string, unknown> = isRecord(source.questionFrame) ? source.questionFrame : {};
+  const title = safeString(source.philosophical_title, safeString(source.topic, '未命名分析'));
+  const topic = safeString(source.topic, title);
+
+  return {
+    ...result,
+    id: safeString(source.id, `imported-${Date.now()}`),
+    createdAt: safeString(source.createdAt, new Date().toISOString()),
+    topic,
+    philosophical_title: title,
+    mode: source.mode || 'custom',
+    modeLabel: safeString(source.modeLabel, '自定义'),
+    introduction: safeString(source.introduction),
+    questionFrame: {
+      original: safeString(questionFrame.original, topic),
+      bigQuestion: safeString(questionFrame.bigQuestion, title),
+      plainTranslation: safeString(questionFrame.plainTranslation),
+      keywords: safeStringArray(questionFrame.keywords),
+    },
+    programStructure: Array.isArray(source.programStructure) ? source.programStructure : [],
+    routeMap: Array.isArray(source.routeMap) ? source.routeMap : [],
+    voices: Array.isArray(source.voices) ? source.voices : [],
+    tensions: Array.isArray(source.tensions) ? source.tensions : [],
+    keywords: Array.isArray(source.keywords) ? source.keywords : [],
+    followUps: Array.isArray(source.followUps) ? source.followUps : [],
+    conclusion: isRecord(source.conclusion)
+      ? {
+        summary: safeString(source.conclusion.summary),
+        openQuestion: safeString(source.conclusion.openQuestion),
+        realLifeReturn: safeString(source.conclusion.realLifeReturn),
+      }
+      : emptyConclusion,
+  };
+};
+
+const normalizeImportedEntry = (entry: HistoryEntry): HistoryEntry => {
+  const result = normalizeImportedResult(entry.result);
+  return {
+    ...entry,
+    id: safeString(entry.id, result.id),
+    topic: safeString(entry.topic, result.topic),
+    title: safeString(entry.title, result.philosophical_title),
+    mode: entry.mode || result.mode,
+    modeLabel: safeString(entry.modeLabel, result.modeLabel),
+    createdAt: safeString(entry.createdAt, result.createdAt),
+    result,
+  };
+};
 
 export const useHistoryLibrary = () => {
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
@@ -143,9 +204,21 @@ export const useHistoryLibrary = () => {
   }, [historyEntries]);
 
   const importHistory = useCallback((content: string) => {
-    const importedEntries = extractImportedHistory(JSON.parse(content))
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return {
+        imported: 0,
+        scanned: 0,
+        limit: HISTORY_LIMIT,
+        error: '导入文件不是有效 JSON。',
+      };
+    }
+
+    const importedEntries = extractImportedHistory(parsed)
       .filter((entry) => !entry.isPreset)
-      .map((entry) => ({ ...entry, isPreset: false, generatedByChain: false }));
+      .map((entry) => ({ ...normalizeImportedEntry(entry), isPreset: false, generatedByChain: false }));
     const existingIds = new Set(historyEntries.map((entry) => entry.id));
     const newEntries = importedEntries.filter((entry) => !existingIds.has(entry.id));
     const nextEntries = [...newEntries, ...historyEntries]

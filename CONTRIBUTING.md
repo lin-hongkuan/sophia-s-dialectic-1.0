@@ -23,10 +23,12 @@ npm run dev
 ```bash
 npm run build      # 输出到 dist/，并复制 index.html 为 404.html 用作 GitHub Pages 的 SPA 回退
 npm test           # 运行 tsx/node:test 的最小质量门
+npm run typecheck  # 单独运行 TypeScript 检查
+npm run verify     # test + typecheck + build
 npm run preview    # 在 7878 端口预览生产构建
 ```
 
-提交前至少跑 `npm test` 与 `npm run build`；涉及 UI、路由或生成流的改动，需要再用浏览器手验关键路径。
+提交前至少跑 `npm run verify`；涉及 UI、路由或生成流的改动，需要再用浏览器手验关键路径。
 
 ## 目录速览
 
@@ -69,8 +71,8 @@ npm run preview    # 在 7878 端口预览生产构建
 │   └── reference-avatars/   # 参考头像 (PNG)
 ├── public/                  # 静态资源（HDR 等）
 ├── scripts/                 # 构建辅助脚本
-├── constants.ts             # 共享常量（STAGE_LABEL / STAGE_ORDER 等）
-├── types.ts                 # 全部数据形态声明
+├── presentation/generationStages.ts             # 共享常量（STAGE_LABEL / STAGE_ORDER 等）
+├── types/domain.ts                 # 全部数据形态声明
 ├── vite.config.ts           # Vite + 本地 API 代理 + define 注入
 └── .github/workflows/       # GitHub Actions（自动部署到 GitHub Pages）
 ```
@@ -81,17 +83,17 @@ npm run preview    # 在 7878 端口预览生产构建
 
 例：想加 `dialectic_court`（辩证法庭）。
 
-1. **`types.ts`** — `ProgramMode` 加 `'dialectic_court'`。
+1. **`types/domain.ts`** — `ProgramMode` 加 `'dialectic_court'`。
 2. **`services/prompts.ts`** — 在 `MODE_LABELS` 加 `'dialectic_court': '辩证法庭'`；在 `outlineSystemPrompt` 的"可选分析路径"列表里加一行说明。
 3. **`services/sophiaService.ts`** — 如果在编排里有 mode-aware 分支（比如 `school_seminar` 走的特殊路径），按需补上对应分支；否则走 `custom` 默认编排即可。
 4. **`components/ArenaSections.tsx`** — 在 `modeIcon` 映射为合适的 lucide-react 图标。
-5. **可选**：如果该 mode 需要专有渲染区域（像 `diagnosisFrame` / `thoughtExperiment` / `seminarMatrix`），在 `types.ts` 加新字段，在 `ArenaSections.tsx` 加对应 section。
+5. **可选**：如果该 mode 需要专有渲染区域（像 `diagnosisFrame` / `thoughtExperiment` / `seminarMatrix`），在 `types/domain.ts` 加新字段，在 `ArenaSections.tsx` 加对应 section。
 
 ### 加一个新的思想声音类型（voiceKind）
 
 例：想加 `'fictional'`（虚构人物）。
 
-1. **`types.ts`** — `VoiceKind` 加 `'fictional'`。
+1. **`types/domain.ts`** — `VoiceKind` 加 `'fictional'`。
 2. **`components/ThoughtVoiceCard.tsx`** — `kindLabel`（行 13）加 `'fictional': '虚构人物'`；`VOICE_KIND_SYMBOL`（行 53）加一个符号字符；如果 ERA 推断需要扩展，更新 `ERA_RULES` / `FALLBACK_ERA_LABEL`。
 3. **`services/sophiaService.ts`** — `VOICE_KIND_AVATAR_SUBJECT`（行 182-188）加描述用于头像 prompt。
 4. **`services/prompts.ts`** — 如果需要在 outline / voice prompts 里专门提到这种 kind，补段说明。
@@ -124,12 +126,13 @@ type(scope): 简短描述
 
 - `feat(settings): add prompt editor and runtime knobs`
 - `fix(prompts): tighten tension content target to 220-320 chars`
-- `refactor: extract stage labels to constants.ts`
+- `refactor: extract stage labels to presentation/generationStages.ts`
 
 提交前请确保：
 
 - `npm test` 通过。
-- `npm run build` 通过（隐含 TypeScript 检查）。
+- `npm run typecheck` 通过。
+- `npm run build` 通过。
 - 关键路径手验：首页输入 → 提交 → 生成日志面板 → 历史保存。
 - 涉及生成或 prompt 改动时，跑一次完整生成做肉眼验证。
 

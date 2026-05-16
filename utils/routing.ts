@@ -1,6 +1,7 @@
-import type { HistoryEntry } from '../types';
+import type { HistoryEntry } from '../types/storage';
 
 export type View = 'home' | 'history' | 'manifesto' | 'settings' | 'result' | 'concept';
+export type SelectedSource = 'active' | 'history' | null;
 export type AppRoute = '/' | '/active' | '/history' | '/history/sample' | '/manifesto' | '/settings' | `/history/${string}` | `/concept/${string}/${string}`;
 
 const ROUTES: Record<string, AppRoute> = {

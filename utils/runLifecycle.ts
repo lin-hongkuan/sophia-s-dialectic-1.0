@@ -1,4 +1,5 @@
-import type { ActiveAnalysisRun, ContinuationContext, GenerationLogEntry, GenerationProgress, RunSnapshotStage } from '../types';
+import type { ContinuationContext, GenerationLogEntry, GenerationProgress } from '../types/pipeline';
+import type { ActiveAnalysisRun, RunSnapshotStage } from '../types/storage';
 import { appendCappedLog, GENERATION_LOG_LIMIT, checkpointStageForProgress } from './generationLog';
 
 export { appendCappedLog, GENERATION_LOG_LIMIT, checkpointStageForProgress } from './generationLog';

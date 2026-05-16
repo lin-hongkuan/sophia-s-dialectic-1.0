@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AnalysisResult } from '../types';
+import type { AnalysisResult } from '../types/domain';
 import { ArrowRight, ChevronDown, Compass, Copy, Download, RefreshCw, Sparkles } from 'lucide-react';
 import { getReflectionFeedback } from '../services/sophiaService';
 import { buildMarkdownFilename, buildResultMarkdown, copyMarkdown, downloadMarkdown } from '../utils/exportResult';

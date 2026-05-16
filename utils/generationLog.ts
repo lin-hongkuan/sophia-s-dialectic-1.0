@@ -1,4 +1,5 @@
-import type { GenerationLogEntry, GenerationProgress, RunSnapshotStage } from '../types';
+import type { GenerationLogEntry, GenerationProgress } from '../types/pipeline';
+import type { RunSnapshotStage } from '../types/storage';
 
 export const GENERATION_LOG_LIMIT = 300;
 

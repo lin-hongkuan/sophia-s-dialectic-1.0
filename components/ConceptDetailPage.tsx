@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { ArrowLeft, BookOpen, Compass, Flame, HelpCircle, Lightbulb, Loader2, Sparkles, Users } from 'lucide-react';
-import { AnalysisResult, KeywordExplainer } from '../types';
+import type { AnalysisResult, KeywordExplainer } from '../types/domain';
 import { enrichKeyword } from '../services/sophiaService';
 import { HangingLabel } from './PageHero';
 

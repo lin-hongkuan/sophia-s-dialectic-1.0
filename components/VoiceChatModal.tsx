@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, Send, Trash2, X } from 'lucide-react';
-import { AnalysisResult, Message, ThoughtVoice } from '../types';
+import type { AnalysisResult, ThoughtVoice } from '../types/domain';
+import type { Message } from '../types/chat';
 import { useVoiceChatSession } from '../hooks/useVoiceChatSession';
 
 interface VoiceChatModalProps {

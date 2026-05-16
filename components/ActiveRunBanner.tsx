@@ -1,7 +1,7 @@
 import React from 'react';
-import { ActiveAnalysisRun } from '../types';
+import type { ActiveAnalysisRun } from '../types/storage';
 import { ArrowRight, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
-import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import { STAGE_LABEL, STAGE_ORDER } from '../presentation/generationStages';
 
 interface ActiveRunBannerProps {
   activeRun: ActiveAnalysisRun;

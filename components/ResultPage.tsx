@@ -1,9 +1,10 @@
 import React from 'react';
-import type { ActiveAnalysisRun, AnalysisResult, GenerationProgress, GenerationLogEntry } from '../types';
+import type { AnalysisResult } from '../types/domain';
+import type { GenerationProgress, GenerationLogEntry } from '../types/pipeline';
+import type { ActiveAnalysisRun } from '../types/storage';
+import type { SelectedSource } from '../utils/routing';
 import Arena from './Arena';
 import RoundtableScene from './RoundtableScene';
-
-type SelectedSource = 'active' | 'history' | null;
 
 interface ResultPageProps {
   selectedSource: SelectedSource;

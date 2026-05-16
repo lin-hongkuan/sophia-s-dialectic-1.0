@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, RotateCcw, Sparkles } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Image as ImageIcon, RotateCcw } from 'lucide-react';
 import { pickRandomArtifact, RubbingArtifact } from '../services/rubbingArtifacts';
 
 interface RubbingGameProps {
@@ -181,7 +181,7 @@ const BoardSlot: React.FC<{
     type="button"
     data-slot={quadrant}
     onClick={onClick}
-    className={`relative aspect-square overflow-hidden border bg-white/55 transition-all duration-200 ${
+    className={`relative aspect-square overflow-hidden rounded-sm border bg-white/55 transition-all duration-200 ${
       placed
         ? 'border-museum-900 shadow-sm'
         : active
@@ -307,24 +307,40 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
 
   const remainingPieces = pieces.filter((p) => !p.placed);
   const progress = `${placedCount}/${TILE_IDS.length}`;
+  const progressPercent = Math.round((placedCount / TILE_IDS.length) * 100);
 
   return (
     <div className="relative flex w-full flex-col items-center">
-      <div className="mb-3 flex w-full items-end justify-between gap-4" style={{ maxWidth: board }}>
-        <div>
-          <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500">
-            Archive Puzzle {String(round).padStart(2, '0')}
-          </p>
-          <p className="mt-1 font-serif text-base text-museum-900">{artifact.title}</p>
+      <div className="mb-3 w-full" style={{ maxWidth: board }}>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500">
+              Archive Puzzle {String(round).padStart(2, '0')}
+            </p>
+            <p className="mt-1 font-serif text-base text-museum-900">{artifact.title}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">{progress}</p>
+            <p className="mt-1 text-[10px] text-museum-500">{streak > 1 ? `连击 ${streak}` : artifact.era}</p>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">{progress}</p>
-          <p className="mt-1 text-[10px] text-museum-500">{streak > 1 ? `连击 ${streak}` : artifact.era}</p>
+        <div
+          className="mt-3 h-1.5 overflow-hidden rounded-full bg-museum-100"
+          role="progressbar"
+          aria-label="藏品修复进度"
+          aria-valuenow={placedCount}
+          aria-valuemin={0}
+          aria-valuemax={TILE_IDS.length}
+        >
+          <div
+            className="h-full rounded-full bg-museum-900 transition-[width] duration-300 motion-reduce:transition-none"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
       </div>
 
       <div
-        className="relative grid grid-cols-3 overflow-hidden border border-museum-300 bg-museum-100/50 shadow-sm"
+        className="relative grid grid-cols-3 overflow-hidden rounded-lg border border-museum-300 bg-museum-100/50 shadow-[0_14px_34px_-26px_rgba(44,42,38,0.75)]"
         style={{ width: board, height: board }}
       >
         <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: GRID_LINE_BACKGROUND }} />
@@ -340,11 +356,11 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
           />
         ))}
         {done && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/86 backdrop-blur-[2px] animate-fade-in">
-            <div className="w-4/5 border border-museum-200 bg-museum-50/95 px-4 py-5 text-center shadow-sm">
-              <Sparkles className="mx-auto h-5 w-5 text-museum-700" />
-              <p className="mt-2 font-serif text-lg text-museum-900">归档完成</p>
-              <p className="mt-1 text-xs leading-relaxed text-museum-600">{artifact.blurb}</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-white/88 backdrop-blur-[2px] animate-fade-in motion-reduce:animate-none">
+            <div className="w-4/5 rounded-lg border border-museum-200 bg-museum-50/95 px-4 py-5 text-center shadow-sm">
+              <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-700" />
+              <p className="mt-2 font-serif text-lg text-museum-900">修复完成</p>
+              <p className="mt-1 text-xs leading-relaxed text-museum-600">藏品配图已插入下方展签。</p>
             </div>
           </div>
         )}
@@ -352,7 +368,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
 
       {!done && (
         <div
-          className="mt-4 grid grid-cols-3 gap-2"
+          className="mt-4 grid grid-cols-3 gap-2 rounded-lg border border-museum-200 bg-white/58 p-2 shadow-sm"
           style={{ width: board }}
         >
         {remainingPieces.map((item) => (
@@ -364,9 +380,9 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
             onPointerUp={onPiecePointerUp}
             onPointerCancel={() => setDragging(null)}
             onClick={() => setSelected((current) => (current === item.id ? null : item.id))}
-            className={`relative aspect-square touch-none overflow-hidden border bg-white/80 shadow-sm transition-all ${
+            className={`relative aspect-square touch-none overflow-hidden rounded-md border bg-white/80 shadow-sm transition-all duration-200 ${
               selected === item.id
-                ? 'border-museum-900 -translate-y-0.5'
+                ? 'border-museum-900 -translate-y-0.5 shadow-md'
                 : 'border-museum-200 hover:border-museum-500'
             } ${dragging === item.id ? 'opacity-30' : 'opacity-100'}`}
             aria-label={`碎片 ${TILE_LABEL[item.id]}`}
@@ -387,7 +403,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
         {Array.from({ length: Math.max(0, TILE_IDS.length - remainingPieces.length) }).map((_, index) => (
           <div
             key={`empty-${index}`}
-            className="aspect-square border border-dashed border-museum-200 bg-museum-50/50"
+            className="aspect-square rounded-md border border-dashed border-museum-200 bg-museum-50/50"
           />
         ))}
         </div>
@@ -395,12 +411,25 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
 
       {done && (
         <aside
-          className="mt-4 max-h-[340px] overflow-auto border border-museum-200 bg-white/90 px-4 py-4 text-left shadow-sm animate-fade-in"
+          className="mt-4 max-h-[460px] overflow-auto rounded-lg border border-museum-200 bg-white/92 p-3 text-left shadow-[0_18px_40px_-30px_rgba(44,42,38,0.75)] animate-fade-in motion-reduce:animate-none"
           style={{ width: board }}
         >
+          <figure className="relative overflow-hidden rounded-md border border-museum-200 bg-museum-100">
+            <img
+              src={artifact.imageUrl}
+              alt={artifact.imageAlt}
+              className="aspect-square w-full object-cover"
+              loading="eager"
+              decoding="async"
+            />
+            <figcaption className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-white/70 bg-white/82 px-2 py-1 text-[9px] font-mono uppercase tracking-[0.16em] text-museum-700 backdrop-blur-sm">
+              <ImageIcon className="h-3 w-3" />
+              Collection Plate
+            </figcaption>
+          </figure>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">Museum Label</p>
+              <p className="mt-4 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-400">Museum Label</p>
               <h3 className="mt-1 font-serif text-lg leading-tight text-museum-900">{artifact.title}</h3>
             </div>
             <span className="shrink-0 rounded-full border border-museum-200 bg-museum-50 px-2 py-1 text-[9px] font-mono uppercase tracking-widest text-museum-500">
@@ -441,7 +470,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
         <button
           type="button"
           onClick={resetCurrent}
-          className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500 transition-colors hover:text-museum-900"
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-2 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-500 transition-colors hover:text-museum-900"
         >
           <RotateCcw className="h-3 w-3" />
           重置
@@ -449,7 +478,7 @@ const RubbingGame: React.FC<RubbingGameProps> = ({ variant = 'panel' }) => {
         <button
           type="button"
           onClick={nextArtifact}
-          className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-700 transition-colors hover:text-museum-900"
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-2 text-[10px] font-mono uppercase tracking-[0.24em] text-museum-700 transition-colors hover:text-museum-900"
         >
           下一件
           <ArrowRight className="h-3 w-3" />

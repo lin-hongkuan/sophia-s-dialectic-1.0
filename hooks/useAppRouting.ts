@@ -1,5 +1,6 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
-import type { ActiveAnalysisRun, AnalysisResult, HistoryEntry } from '../types';
+import type { AnalysisResult } from '../types/domain';
+import type { ActiveAnalysisRun, HistoryEntry } from '../types/storage';
 import { PRELOADED_HISTORY_ENTRY } from '../data/preloadedHistory';
 import {
   AppRoute,
@@ -11,7 +12,7 @@ import {
   pushRoute,
   routeHistoryId,
 } from '../utils/routing';
-import { loadGeneratedPreset, loadHistory } from '../services/historyStore';
+import { loadGeneratedPreset, loadHistory } from '../services/storage/historyStore';
 
 type SelectedSource = 'active' | 'history' | null;
 

@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-05-16T14:55:58.178Z",
+  "model": "grok-imagine-image-lite",
+  "size": "1024x1024",
+  "assets": [
+    {
+      "id": "amphora",
+      "title": "希腊双耳瓶",
+      "file": "/rubbing-artifacts/amphora.jpg",
+      "prompt": "Use case: stylized-concept\nAsset type: static game collectible image for a museum rubbing puzzle completion card\nStyle/medium: museum-editorial painterly realism, tactile catalog plate, refined object study, softly aged paper grain, complete single artifact, not fantasy art.\nComposition/framing: square image, artifact centered on a quiet low plinth or archival cloth, generous breathing room, object fully visible, suitable for cropping inside a compact UI card.\nLighting/mood: soft directional gallery light, calm scholarly mood, subtle shadow, restrained but vivid.\nColor palette: warm ivory, charcoal, muted mineral blue, oxide red, aged bronze, porcelain white accents where appropriate.\nConstraints: no readable text, no Chinese characters, no labels, no logos, no UI, no watermark, no people unless explicitly requested, no busy background.\nPrimary request: create a polished collectible image for the artifact described below.\nSubject: Ancient Greek black-figure amphora, terracotta clay body, twin handles, narrow neck and rounded belly, subtle mythic black-figure ornament treated as non-readable decoration.",
+      "skipped": true,
+      "source": "SOPHIA_API_BASE_URL /images/generations",
+      "model": "grok-imagine-image-lite"
+    },
+    {
+      "id": "cauldron",
+      "title": "青铜鼎",
+      "file": "/rubbing-artifacts/cauldron.jpg",
+      "prompt": "Use case: stylized-concept\nAsset type: static game collectible image for a museum rubbing puzzle completion card\nStyle/medium: museum-editorial painterly realism, tactile catalog plate, refined object study, softly aged paper grain, complete single artifact, not fantasy art.\nComposition/framing: square image, artifact centered on a quiet low plinth or archival cloth, generous breathing room, object fully visible, suitable for cropping inside a compact UI card.\nLighting/mood: soft directional gallery light, calm scholarly mood, subtle shadow, restrained but vivid.\nColor palette: warm ivory, charcoal, muted mineral blue, oxide red, aged bronze, porcelain white accents where appropriate.\nConstraints: no readable text, no Chinese characters, no labels, no logos, no UI, no watermark, no people unless explicitly requested, no busy background.\nPrimary request: create a polished collectible image for the artifact described below.\nSubject: Ancient Chinese bronze ding cauldron, three sturdy legs, twin loop handles, oxidized bronze patina, ceremonial weight and authority.",
+      "skipped": true,
+      "source": "SOPHIA_API_BASE_URL /images/generations",
+      "model": "grok-imagine-image-lite"
+    },
+    {
+      "id": "violin",
+      "title": "小提琴",
+      "file": "/rubbing-artifacts/violin.jpg",
+      "prompt": "Use case: stylized-concept\nAsset type: static game collectible image for a museum rubbing puzzle completion card\nStyle/medium: museum-editorial painterly realism, tactile catalog plate, refined object study, softly aged paper grain, complete single artifact, not fantasy art.\nComposition/framing: square image, artifact centered on a quiet low plinth or archival cloth, generous breathing room, object fully visible, suitable for cropping inside a compact UI card.\nLighting/mood: soft directional gallery light, calm scholarly mood, subtle shadow, restrained but vivid.\nColor palette: warm ivory, charcoal, muted mineral blue, oxide red, aged bronze, porcelain white accents where appropriate.\nConstraints: no readable text, no Chinese characters, no labels, no logos, no UI, no watermark, no people unless explicitly requested, no busy background.\nPrimary request: create a polished collectible image for the artifact described below.\nSubject: Seventeenth-century violin, warm varnished wood, f-holes, bridge, strings and bow nearby, intimate chamber-music artifact rather than performance scene.",
+      "skipped": true,
+      "source": "SOPHIA_API_BASE_URL /images/generations",
+      "model": "grok-imagine-image-lite"
+    },
+    {
+      "id": "pocket-watch",
+      "title": "怀表",
+      "file": "/rubbing-artifacts/pocket-watch.jpg",
+      "prompt": "Use case: stylized-concept\nAsset type: static game collectible image for a museum rubbing puzzle completion card\nStyle/medium: museum-editorial painterly realism, tactile catalog plate, refined object study, softly aged paper grain, complete single artifact, not fantasy art.\nComposition/framing: square image, artifact centered on a quiet low plinth or archival cloth, generous breathing room, object fully visible, suitable for cropping inside a compact UI card.\nLighting/mood: soft directional gallery light, calm scholarly mood, subtle shadow, restrained but vivid.\nColor palette: warm ivory, charcoal, muted mineral blue, oxide red, aged bronze, porcelain white accents where appropriate.\nConstraints: no readable text, no Chinese characters, no labels, no logos, no UI, no watermark, no people unless explicitly requested, no busy background.\nPrimary request: create a polished collectible image for the artifact described below.\nSubject: Nineteenth-century pocket watch opened at an angle, metal case, chain, visible dial and mechanical detail, no readable numerals or words.",
+      "skipped": true,
+      "source": "SOPHIA_API_BASE_URL /images/generations",
+      "model": "grok-imagine-image-lite"
+    },
+    {
+      "id": "handheld-fan",
+      "title": "折扇",
+      "file": "/rubbing-artifacts/handheld-fan.jpg",
+      "prompt": "decorative folding hand fan opened into a semicircle, fine wooden ribs, pale paper surface, museum artifact object photo, centered on archival cloth, no people, no face, no woman, no portrait, no hair, no animal, no text, no watermark, square image",
+      "skipped": true,
+      "source": "pollinations.ai prompt endpoint",
+      "model": "pollinations.ai"
+    },
+    {
+      "id": "ionic-column",
+      "title": "爱奥尼柱",
+      "file": "/rubbing-artifacts/ionic-column.jpg",
+      "prompt": "single ancient stone Ionic column capital artifact, paired volutes, museum object photo, centered on plinth, no people, no face, no woman, no portrait, no hair, no animal, no text, no watermark, square image",
+      "skipped": true,
+      "source": "pollinations.ai prompt endpoint",
+      "model": "pollinations.ai"
+    },
+    {
+      "id": "philosopher-bust",
+      "title": "哲人胸像",
+      "file": "/rubbing-artifacts/philosopher-bust.jpg",
+      "prompt": "classical marble philosopher bust artifact, head and shoulders statue on simple base, museum object photo, centered on plinth, no living person, no modern portrait, no hair strands, no text, no watermark, square image",
+      "skipped": true,
+      "source": "pollinations.ai prompt endpoint",
+      "model": "pollinations.ai"
+    },
+    {
+      "id": "porcelain-vase",
+      "title": "瓷瓶",
+      "file": "/rubbing-artifacts/porcelain-vase.jpg",
+      "prompt": "Chinese porcelain vase artifact, slender neck, rounded shoulder, glossy blue and white glaze, museum object photo, centered on archival cloth, no people, no face, no animal, no text, no watermark, square image",
+      "skipped": true,
+      "source": "pollinations.ai prompt endpoint",
+      "model": "pollinations.ai"
+    }
+  ],
+  "sources": [
+    {
+      "ids": [
+        "amphora",
+        "cauldron",
+        "violin",
+        "pocket-watch"
+      ],
+      "model": "grok-imagine-image-lite",
+      "mode": "OpenAI-compatible /images/generations via SOPHIA_API_BASE_URL"
+    },
+    {
+      "ids": [
+        "handheld-fan",
+        "ionic-column",
+        "philosopher-bust",
+        "porcelain-vase"
+      ],
+      "model": "pollinations.ai prompt endpoint",
+      "mode": "external AI image endpoint fallback after configured image gateway returned repeated 500s"
+    }
+  ]
+}

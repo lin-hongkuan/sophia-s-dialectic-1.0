@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Announcement } from '../data/announcement';
-import { safeLocalStorageGet, safeLocalStorageSet } from '../services/localStorageGateway';
+import { safeLocalStorageGet, safeLocalStorageSet } from '../services/storage/localStorageGateway';
 
 export const ANNOUNCEMENT_DISMISSED_KEY = 'sophia.announcement.dismissed.v1';
 

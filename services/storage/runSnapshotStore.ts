@@ -17,7 +17,7 @@
  *     (older than RUN_SNAPSHOT_TTL_MS), and surfaces the most recent one.
  */
 
-import { RunSnapshot } from '../types';
+import type { RunSnapshot } from '../../types/storage';
 import { createKeyValueStore } from './indexedDbStore';
 
 const store = createKeyValueStore<RunSnapshot>({

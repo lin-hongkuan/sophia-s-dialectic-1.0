@@ -1,30 +1,8 @@
-import {
-  AnalysisOutline,
-  AnalysisResult,
-  AnalyzeCallbacks,
-  AppendVoiceCallbacks,
-  ContinuationContext,
-  GenerationLogEntry,
-  GenerationProgress,
-  KeywordExplainer,
-  MagazineImageAsset,
-  MagazineImageSlot,
-  Message,
-  OpenConclusion,
-  ProgramMode,
-  RouteNode,
-  RunControlHandle,
-  RunSnapshot,
-  TensionFocus,
-  ThoughtVoice,
-  ThoughtVoiceImageAvatar,
-  ThoughtExperimentImage,
-  TokenUsage,
-  TokenUsageStage,
-  VoiceInsertSeed,
-  VoiceKind,
-  emptyConclusion,
-} from '../types';
+import { emptyConclusion } from '../types/domain';
+import type { AnalysisOutline, AnalysisResult, KeywordExplainer, MagazineImageAsset, MagazineImageSlot, RouteNode, ThoughtVoice, ThoughtVoiceImageAvatar, ThoughtExperimentImage, VoiceKind } from '../types/domain';
+import type { AnalyzeCallbacks, AppendVoiceCallbacks, ContinuationContext, GenerationProgress, RunControlHandle, TokenUsage, VoiceInsertSeed } from '../types/pipeline';
+import type { RunSnapshot } from '../types/storage';
+import type { Message } from '../types/chat';
 import { buildVoicePersona } from './voiceChat';
 import {
   HISTORICAL_PHILOSOPHER_AVATAR_STYLE,
@@ -32,7 +10,6 @@ import {
   MODE_LABELS,
   NEGATIVE_AVATAR_PROMPT,
   THOUGHT_VOICE_AVATAR_STYLE,
-  VALID_MODES,
   VOICE_KIND_AVATAR_SUBJECT,
   resolveHistoricalPhilosopherAvatarStyle,
   resolveHistoricalPhilosopherNegativeAvatarPrompt,
@@ -44,9 +21,9 @@ import {
 } from './prompts';
 import { getActiveConfig } from './sophiaConfig';
 import { buildAnalysisProfileInstruction } from './analysisProfile';
-import { buildUsage, recordUsage as recordUsageStandalone } from './tokenAccounting';
+import { recordUsage as recordUsageStandalone } from './tokenAccounting';
 import { ModelJsonParseError, parseModelJson } from './jsonResponse';
-import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './stageCache';
+import { buildStageKey, getStageEntry, putStageEntry, withStageCache } from './storage/stageCache';
 import {
   apiErrorMessage,
   chatEndpoint,
@@ -56,154 +33,40 @@ import {
   parseChatCompletionResponseText,
   requestHeaders,
   type ChatMessage,
-} from './apiClient';
-import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
+} from './api/apiClient';
+import {
+  isKeywordEnriched,
+  normalizeConclusion,
+  normalizeDiagnosisFrame,
+  normalizeFollowUps,
+  normalizeKeyword,
+  normalizeKeywords,
+  normalizeMode,
+  normalizeProgramStructure,
+  normalizeQuestionFrame,
+  normalizeQuestionSuggestions,
+  normalizeRouteMap,
+  normalizeSeminarMatrix,
+  normalizeTensions,
+  normalizeThoughtExperiment,
+  normalizeVoicePlans,
+  toText,
+  toTextArray,
+} from './analysis/normalizers';
+import {
+  currentRunContext,
+  effectiveSignal,
+  emitLog,
+  makeId,
+  popRunContext,
+  pushRunContext,
+  recordUsageFromResponse,
+  startHeartbeat,
+  withStage,
+} from './analysis/runContext';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../presentation/imageMessages';
 
 export { THOUGHT_VOICE_AVATAR_STYLE } from './prompts';
-
-interface RunContext {
-  onLog?: (entry: GenerationLogEntry) => void;
-  onTokenUsage?: (usage: TokenUsage) => void;
-  stage: TokenUsageStage;
-  voiceId?: string;
-  voiceName?: string;
-  /**
-   * Run-wide cancel signal (e.g., the user clicked "取消"). Threaded into
-   * fetchWithRetry by the chat/image callers below. When this fires every
-   * in-flight network call aborts.
-   */
-  abortSignal?: AbortSignal;
-  /**
-   * Per-voice cancel signal pushed onto the stack while a voice is being
-   * generated. Skipping a single voice aborts only this signal, leaving the
-   * run-wide signal alive so the rest of the pipeline keeps going.
-   */
-  voiceAbortSignal?: AbortSignal;
-}
-
-const runStack: RunContext[] = [];
-
-const currentRunContext = (): RunContext | null => runStack[runStack.length - 1] || null;
-
-/**
- * Compose the run-wide signal with the per-voice signal so a single call to
- * fetchWithRetry can react to either. We can't use AbortSignal.any (not in
- * TS lib targets here) so a tiny manual fan-in does the job.
- */
-const effectiveSignal = (ctx: RunContext | null): AbortSignal | undefined => {
-  if (!ctx) return undefined;
-  const { abortSignal: run, voiceAbortSignal: voice } = ctx;
-  if (!run && !voice) return undefined;
-  if (run && !voice) return run;
-  if (voice && !run) return voice;
-  // Both present — fan in by aborting a fresh controller when either fires.
-  const merged = new AbortController();
-  const onAbort = (origin?: AbortSignal) => merged.abort(origin?.reason);
-  if (run!.aborted) merged.abort(run!.reason);
-  else run!.addEventListener('abort', () => onAbort(run!), { once: true });
-  if (voice!.aborted) merged.abort(voice!.reason);
-  else voice!.addEventListener('abort', () => onAbort(voice!), { once: true });
-  return merged.signal;
-};
-
-const pushRunContext = (ctx: RunContext) => {
-  runStack.push(ctx);
-  return ctx;
-};
-
-const popRunContext = (ctx: RunContext) => {
-  const idx = runStack.lastIndexOf(ctx);
-  if (idx >= 0) runStack.splice(idx, 1);
-};
-
-const withStage = <T>(stage: TokenUsageStage, fn: () => Promise<T>, extra?: Pick<RunContext, 'voiceId' | 'voiceName'>): Promise<T> => {
-  const top = currentRunContext();
-  if (!top) return fn();
-  const ctx = pushRunContext({
-    ...top,
-    stage,
-    voiceId: extra?.voiceId ?? top.voiceId,
-    voiceName: extra?.voiceName ?? top.voiceName,
-  });
-  return fn().finally(() => popRunContext(ctx));
-};
-
-const emitLog = (entry: Omit<GenerationLogEntry, 'id' | 'ts'> & { id?: string; ts?: string }) => {
-  const ctx = currentRunContext();
-  if (!ctx?.onLog) return;
-  const id = entry.id || `log-${Date.now()}-${shortRandomId()}`;
-  ctx.onLog({
-    id,
-    ts: entry.ts || new Date().toISOString(),
-    level: entry.level,
-    stage: entry.stage,
-    voiceId: entry.voiceId ?? ctx.voiceId,
-    voiceName: entry.voiceName ?? ctx.voiceName,
-    message: entry.message,
-    tokens: entry.tokens,
-  });
-};
-
-const HEARTBEAT_MESSAGES: Partial<Record<GenerationLogEntry['stage'], string[]>> = {
-  outline: [
-    '[keepalive] outline · waiting on /chat/completions JSON response',
-    '[keepalive] outline · parsing questionFrame / programStructure / routeMap / voicePlans',
-    '[keepalive] outline · server-side reasoning still running',
-  ],
-  route: [
-    '[keepalive] route · waiting on /chat/completions JSON response',
-    '[keepalive] route · expanding routeMap nodes and tension links',
-    '[keepalive] route · server-side reasoning still running',
-  ],
-  synthesis: [
-    '[keepalive] synthesis · waiting on /chat/completions JSON response',
-    '[keepalive] synthesis · merging tensions / keywords / followUps / conclusion',
-    '[keepalive] synthesis · server-side reasoning still running',
-  ],
-};
-
-const startHeartbeat = (stage: GenerationLogEntry['stage'], label: string, intervalMs = 18000) => {
-  if (typeof window === 'undefined') return () => {};
-  const messages = HEARTBEAT_MESSAGES[stage] || [label];
-  const ctx = currentRunContext();
-  const voiceId = ctx?.voiceId;
-  const voiceName = ctx?.voiceName;
-  let index = 0;
-  const emitBeat = () => {
-    const message = messages[index % messages.length];
-    index += 1;
-    emitLog({
-      level: 'detail',
-      stage,
-      voiceId,
-      voiceName,
-      message: `${message}。`,
-    });
-  };
-  const handle = window.setInterval(emitBeat, intervalMs);
-  return () => window.clearInterval(handle);
-};
-
-const recordUsageFromResponse = (
-  raw: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined,
-  modelOverride?: string,
-): TokenUsage | null => {
-  const ctx = currentRunContext();
-  if (!ctx) return null;
-  const cfg = getActiveConfig();
-  const usage = buildUsage(raw, ctx.stage, modelOverride || cfg.apiModel, ctx.voiceId);
-  if (!usage) return null;
-  ctx.onTokenUsage?.(usage);
-  return usage;
-};
-
-const shortRandomId = (): string => {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid) return uuid.replace(/-/g, '').slice(0, 8);
-  return Math.random().toString(36).slice(2, 10);
-};
-
-const makeId = (prefix: string) => `${prefix}-${Date.now()}-${shortRandomId()}`;
 
 const parseJson = <T>(content: string): T => parseModelJson<T>(content);
 
@@ -666,264 +529,6 @@ const callChatText = async (
     });
     return fullText;
   }
-};
-
-const normalizeMode = (mode: string | undefined): ProgramMode => {
-  if (mode && VALID_MODES.has(mode)) return mode as ProgramMode;
-  return 'custom';
-};
-
-const normalizeKind = (kind: string | undefined): VoiceKind => {
-  if (kind === 'philosopher' || kind === 'school' || kind === 'concept' || kind === 'position' || kind === 'contemporary') return kind;
-  return 'philosopher';
-};
-
-const isRecord = (value: unknown): value is Record<string, any> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const toText = (value: unknown, fallback = ''): string => {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return fallback;
-};
-
-const toTextArray = (value: unknown): string[] =>
-  Array.isArray(value) ? value.map((item) => toText(item)).filter(Boolean) : [];
-
-const normalizeQuestionFrame = (value: unknown, topic: string, title: string): AnalysisOutline['questionFrame'] => {
-  const source = isRecord(value) ? value : {};
-  return {
-    original: toText(source.original, topic),
-    bigQuestion: toText(source.bigQuestion, title || topic),
-    plainTranslation: toText(source.plainTranslation),
-    keywords: toTextArray(source.keywords),
-  };
-};
-
-const normalizeProgramStructure = (value: unknown): AnalysisOutline['programStructure'] =>
-  Array.isArray(value)
-    ? value.map((item, index) => {
-      const source = isRecord(item) ? item : {};
-      return {
-        id: toText(source.id, `section-${index + 1}`),
-        title: toText(source.title, `阅读节点 ${index + 1}`),
-        description: toText(source.description),
-      };
-    })
-    : [];
-
-const normalizeRouteMap = (value: unknown): RouteNode[] =>
-  Array.isArray(value)
-    ? value.map((item, index) => {
-      const source = isRecord(item) ? item : {};
-      const node: RouteNode = {
-        id: toText(source.id, `route-${index + 1}`),
-        title: toText(source.title, `路线节点 ${index + 1}`),
-        role: toText(source.role, '节点'),
-        plain: toText(source.plain),
-        philosophical: toText(source.philosophical),
-      };
-      const tension = toText(source.tension);
-      const nextQuestion = toText(source.nextQuestion);
-      if (tension) node.tension = tension;
-      if (nextQuestion) node.nextQuestion = nextQuestion;
-      return node;
-    })
-    : [];
-
-const normalizeVoicePlans = (value: unknown): AnalysisOutline['voicePlans'] =>
-  Array.isArray(value)
-    ? value.slice(0, 5).map((voice, index) => {
-      const source = isRecord(voice) ? voice : {};
-      return {
-        id: toText(source.id, `voice-${index + 1}`),
-        name: toText(source.name, `思想声音 ${index + 1}`),
-        kind: normalizeKind(toText(source.kind)),
-        school: toText(source.school),
-        role: toText(source.role, '思想声音'),
-        coreConcept: toText(source.coreConcept),
-        oneLine: toText(source.oneLine, toText(source.stance)),
-        stance: toText(source.stance, toText(source.oneLine)),
-        diagnosis: toText(source.diagnosis),
-        prescription: toText(source.prescription),
-        thesis: toText(source.thesis),
-        critique: toText(source.critique),
-      };
-    })
-    : [];
-
-const normalizeSeminarMatrix = (value: unknown): AnalysisOutline['seminarMatrix'] => {
-  if (!isRecord(value)) return undefined;
-  const cells = Array.isArray(value.cells)
-    ? value.cells.map((cell, index) => {
-      const source = isRecord(cell) ? cell : {};
-      return {
-        id: toText(source.id, `cell-${index + 1}`),
-        factualOption: toText(source.factualOption),
-        valueOption: toText(source.valueOption),
-        label: toText(source.label, `位置 ${index + 1}`),
-        description: toText(source.description),
-      };
-    })
-    : [];
-
-  const matrix = {
-    factualQuestion: toText(value.factualQuestion),
-    valueQuestion: toText(value.valueQuestion),
-    factualOptions: toTextArray(value.factualOptions),
-    valueOptions: toTextArray(value.valueOptions),
-    cells,
-  };
-
-  return matrix.factualQuestion || matrix.valueQuestion || matrix.cells.length > 0 ? matrix : undefined;
-};
-
-const normalizeDiagnosisFrame = (value: unknown): AnalysisOutline['diagnosisFrame'] => {
-  if (!isRecord(value)) return undefined;
-  const doctors = Array.isArray(value.doctors)
-    ? value.doctors.map((doctor, index) => {
-      const source = isRecord(doctor) ? doctor : {};
-      return {
-        voiceId: toText(source.voiceId, `voice-${index + 1}`),
-        diagnosis: toText(source.diagnosis),
-        prescription: toText(source.prescription),
-      };
-    })
-    : [];
-
-  const frame = {
-    symptomTitle: toText(value.symptomTitle),
-    symptoms: toTextArray(value.symptoms),
-    framing: toText(value.framing),
-    doctors,
-  };
-
-  return frame.symptomTitle || frame.symptoms.length > 0 || frame.framing || frame.doctors.length > 0 ? frame : undefined;
-};
-
-const normalizeThoughtExperiment = (value: unknown): AnalysisOutline['thoughtExperiment'] => {
-  if (!isRecord(value)) return undefined;
-  const responseMap = Array.isArray(value.responseMap)
-    ? value.responseMap.map((response, index) => {
-      const source = isRecord(response) ? response : {};
-      return {
-        voiceId: toText(source.voiceId, `voice-${index + 1}`),
-        route: toText(source.route),
-      };
-    })
-    : [];
-  const poeticVersion = toText(value.poeticVersion);
-  const frame = {
-    ...(poeticVersion ? { poeticVersion } : {}),
-    unsettlingVersion: toText(value.unsettlingVersion),
-    coreChallenge: toText(value.coreChallenge),
-    stakes: toText(value.stakes),
-    responseMap,
-  };
-
-  return frame.poeticVersion || frame.unsettlingVersion || frame.coreChallenge || frame.stakes || frame.responseMap.length > 0 ? frame : undefined;
-};
-
-const normalizeTensions = (value: unknown): TensionFocus[] =>
-  Array.isArray(value)
-    ? value.map((item, index) => {
-      const source = isRecord(item) ? item : {};
-      return {
-        id: toText(source.id, `tension-${index + 1}`),
-        title: toText(source.title, `分歧 ${index + 1}`),
-        content: toText(source.content),
-        relatedVoiceIds: toTextArray(source.relatedVoiceIds),
-      };
-    })
-    : [];
-
-const normalizeRepresentativeFigures = (value: unknown): KeywordExplainer['representativeFigures'] => {
-  if (!Array.isArray(value)) return undefined;
-  const figures = value
-    .map((item) => {
-      if (!isRecord(item)) return null;
-      const name = toText(item.name).trim();
-      if (!name) return null;
-      return { name, oneLine: toText(item.oneLine).trim() };
-    })
-    .filter((entry): entry is { name: string; oneLine: string } => entry !== null);
-  return figures.length > 0 ? figures : undefined;
-};
-
-const optionalText = (value: unknown): string | undefined => {
-  const text = toText(value).trim();
-  return text || undefined;
-};
-
-const optionalTextArray = (value: unknown): string[] | undefined => {
-  const arr = toTextArray(value).map((entry) => entry.trim()).filter(Boolean);
-  return arr.length > 0 ? arr : undefined;
-};
-
-const isKeywordEnriched = (kw: Pick<KeywordExplainer, 'definition' | 'misconception' | 'representativeFigures' | 'relationToQuestion' | 'lifeExample' | 'challengeQuestion' | 'furtherReading'>): boolean => {
-  // Treat the keyword as "enriched" only when at least 4 of the 7 long-form
-  // fields are present. Synthesis often returns 6-7; older / partial results
-  // returning 0-3 should still trigger the enrichment LLM call.
-  let count = 0;
-  if (kw.definition) count += 1;
-  if (kw.misconception) count += 1;
-  if (kw.representativeFigures && kw.representativeFigures.length > 0) count += 1;
-  if (kw.relationToQuestion) count += 1;
-  if (kw.lifeExample) count += 1;
-  if (kw.challengeQuestion) count += 1;
-  if (kw.furtherReading && kw.furtherReading.length > 0) count += 1;
-  return count >= 4;
-};
-
-const normalizeKeyword = (item: unknown, index: number): KeywordExplainer => {
-  const source = isRecord(item) ? item : {};
-  const definition = optionalText(source.definition);
-  const misconception = optionalText(source.misconception);
-  const representativeFigures = normalizeRepresentativeFigures(source.representativeFigures);
-  const relationToQuestion = optionalText(source.relationToQuestion);
-  const lifeExample = optionalText(source.lifeExample);
-  const challengeQuestion = optionalText(source.challengeQuestion);
-  const furtherReading = optionalTextArray(source.furtherReading);
-  const explicitEnriched = typeof source.enriched === 'boolean' ? source.enriched : undefined;
-  const longForm = { definition, misconception, representativeFigures, relationToQuestion, lifeExample, challengeQuestion, furtherReading };
-  return {
-    id: toText(source.id, `keyword-${index + 1}`),
-    term: toText(source.term, `关键词 ${index + 1}`),
-    meaning: toText(source.meaning),
-    importance: toText(source.importance),
-    ...longForm,
-    enriched: explicitEnriched ?? isKeywordEnriched(longForm),
-  };
-};
-
-const normalizeKeywords = (value: unknown): KeywordExplainer[] =>
-  Array.isArray(value) ? value.map(normalizeKeyword) : [];
-
-const normalizeFollowUps = (value: unknown): AnalysisResult['followUps'] =>
-  Array.isArray(value)
-    ? value.map((item, index) => {
-      const source = isRecord(item) ? item : {};
-      return {
-        id: toText(source.id, `follow-${index + 1}`),
-        question: toText(source.question),
-        reason: toText(source.reason),
-      };
-    }).filter((item) => item.question)
-    : [];
-
-const normalizeQuestionSuggestions = (value: unknown): string[] =>
-  (Array.isArray(value) ? value : [])
-    .map((item) => toText(item).replace(/^[-•\d.、\s]+/, '').trim())
-    .filter((item) => item.length >= 4)
-    .slice(0, 5);
-
-const normalizeConclusion = (value: unknown): OpenConclusion => {
-  if (!isRecord(value)) return emptyConclusion;
-  return {
-    summary: toText(value.summary),
-    openQuestion: toText(value.openQuestion),
-    realLifeReturn: toText(value.realLifeReturn),
-  };
 };
 
 const formatContinuationContext = (context?: ContinuationContext) => {

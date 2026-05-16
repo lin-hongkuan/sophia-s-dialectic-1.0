@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, MinusCircle, Pause, Sparkles, X, SkipForward, Plus, ChevronDown, Hammer } from 'lucide-react';
-import { AnalysisResult, GenerationLogEntry, GenerationProgress, ProgramMode, ThoughtVoice } from '../types';
-import { STAGE_LABEL, STAGE_ORDER, getModePresentation, ModePresentation } from '../constants';
+import type { AnalysisResult, ProgramMode, ThoughtVoice } from '../types/domain';
+import type { GenerationLogEntry, GenerationProgress } from '../types/pipeline';
+import { STAGE_LABEL, STAGE_ORDER } from '../presentation/generationStages';
+import { getModePresentation } from '../presentation/modePresentation';
+import type { ModePresentation } from '../presentation/modePresentation';
 import { estimateGenerationProgress, formatElapsedTime } from '../utils/generationProgress';
 import GenerationLogPanel from './GenerationLogPanel';
 import RubbingGame from './RubbingGame';

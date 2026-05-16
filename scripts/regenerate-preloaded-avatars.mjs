@@ -1,11 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-// API configuration from .env.local
-const API_BASE_URL = 'https://api.linhongkuan.com/v1';
-const API_KEY = 'sk-WcuXYbfydsHFUteYat0pIbkSVFQEKZStG3wMfICIXXF7N2eZ';
-const IMAGE_MODEL = 'grok-imagine-image-lite';
-const IMAGE_SIZE = '1024x1024';
+// API configuration. Load from the shell environment; do not hard-code real keys.
+const API_BASE_URL = process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1';
+const API_KEY = process.env.SOPHIA_API_KEY || '';
+const IMAGE_MODEL = process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite';
+const IMAGE_SIZE = process.env.SOPHIA_IMAGE_SIZE || '1024x1024';
+
+if (!API_KEY) {
+  throw new Error('SOPHIA_API_KEY is required to regenerate preloaded avatars.');
+}
 
 // Voice prompts - OPTIMIZED VERSION
 // Key improvements:

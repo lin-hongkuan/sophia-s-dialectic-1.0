@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, ArrowDown, Activity } from 'lucide-react';
-import { GenerationLogEntry } from '../types';
-import { STAGE_LABEL } from '../constants';
+import type { GenerationLogEntry } from '../types/pipeline';
+import { STAGE_LABEL } from '../presentation/generationStages';
 
 interface GenerationLogPanelProps {
   entries: GenerationLogEntry[];

@@ -1,4 +1,5 @@
-import type { AnalysisResult, HistoryEntry } from '../types';
+import type { AnalysisResult } from '../../types/domain';
+import type { HistoryEntry } from '../../types/storage';
 import { buildAvatarKey, buildMagazineImageKey, buildSceneImageKey, getAvatarImages, putAvatarImage } from './imageStore';
 import { createLocalJsonStore, safeLocalStorageGet, safeLocalStorageSet } from './localStorageGateway';
 

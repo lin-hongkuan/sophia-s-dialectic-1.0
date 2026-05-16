@@ -1,4 +1,6 @@
-import { HistoryEntry } from '../types';
+import type { HistoryEntry } from '../types/storage';
+import preloadedMagazineConclusion from './reference-magazine/conclusion-feminism-seminar.jpg';
+import preloadedMagazineCover from './reference-magazine/cover-feminism-seminar.jpg';
 import voice1Avatar from './reference-avatars/01-自由主义女性主义-grok-imagine-image-lite.png';
 import voice2Avatar from './reference-avatars/02-激进女性主义-grok-imagine-image-lite.png';
 import voice3Avatar from './reference-avatars/03-交叉性女性主义-grok-imagine-image-lite.png';
@@ -339,6 +341,24 @@ export const PRELOADED_HISTORY_ENTRY: HistoryEntry = {
         "reason": "这能把讨论从理论争辩转向现实经验，帮助判断该用哪一种女性主义视角最合适。"
       }
     ],
+    "magazineImages": {
+      "cover": {
+        "imageUrl": preloadedMagazineCover,
+        "prompt": "AI-generated opening philosophy magazine plate for the feminism seminar demo: five symbolic positions around a shared round table, linked to a blank luminous page, museum-editorial paper texture, restrained palette, no readable text.",
+        "model": "grok-imagine-image-lite",
+        "alt": "Opening magazine plate for the feminism seminar demo",
+        "generatedAt": "2026-05-15T19:20:31.000Z",
+        "status": "completed"
+      },
+      "conclusion": {
+        "imageUrl": preloadedMagazineConclusion,
+        "prompt": "AI-generated closing philosophy magazine plate for the feminism seminar demo: colored argument paths converge through an open doorway from seminar space into ordinary life, reflective and unresolved, no readable text.",
+        "model": "grok-imagine-image-lite",
+        "alt": "Closing magazine plate for the feminism seminar demo",
+        "generatedAt": "2026-05-15T19:20:45.000Z",
+        "status": "completed"
+      }
+    },
     "conclusion": {
       "summary": "综合来看，女性主义是“有道理”的，但它有道理的方式不是单一的。自由主义女性主义说明，很多不平等并不需要等到世界观重写才会显现：只要看工资差距、育儿负担、职场晋升和公共设施是否默认男性生活节奏，就能发现制度并不中立。激进女性主义进一步指出，问题不止在门槛不公平，而在家庭、亲密关系、性别角色和身体规训本身就可能是权力结构的一部分。交叉性女性主义则提醒，女性并非一个统一主体，阶级、种族、地域、能力与性取向会改变压迫的样子，因此任何“女性经验”的总括都要谨慎。后结构女性主义让我们看到，许多所谓“自然的女性气质”其实是被语言和规范制造出来的。与此同时，性别差异论批评也提供了必要的纠偏：平等不该意味着把所有人塞进同一种人生模板，也不该把照料、家庭与身体经验一概贬低。最合理的结论是，女性主义不是一套必须全盘接受的教条，而是一组用来识别偏差、揭示结构、修正规则的思想资源。它的核心价值，在于让我们重新问：谁被当成默认标准，谁被迫适应，谁的代价被看不见。",
       "openQuestion": "在承认差异的同时，女性主义究竟需要保留哪些最低限度的共同原则，才不会散成彼此冲突的立场集合？",

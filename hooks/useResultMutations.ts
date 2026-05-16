@@ -2,12 +2,12 @@ import { useState, type Dispatch, type SetStateAction } from 'react';
 import { appendThoughtVoice, regenerateThoughtVoice, regenerateVoiceAvatar } from '../services/sophiaService';
 import { recordUsage as recordTokenUsage } from '../services/tokenAccounting';
 import { PRELOADED_HISTORY_ENTRY } from '../data/preloadedHistory';
-import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
+import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../presentation/imageMessages';
 import { createVoiceStreamThrottle } from '../utils/voiceStreamThrottle';
 import { pushRoute, type View } from '../utils/routing';
-import type { ActiveAnalysisRun, AnalysisResult, HistoryEntry } from '../types';
-
-type SelectedSource = 'active' | 'history' | null;
+import type { AnalysisResult } from '../types/domain';
+import type { ActiveAnalysisRun, HistoryEntry } from '../types/storage';
+import type { SelectedSource } from '../utils/routing';
 
 interface UseResultMutationsOptions {
   activeRun: ActiveAnalysisRun | null;

@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { ActiveAnalysisRun, HistoryEntry } from '../types';
+import type { ActiveAnalysisRun, HistoryEntry } from '../types/storage';
 import { AlertCircle, Archive, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, Clock, Download, Loader2, Quote, RotateCcw, Sparkles, Trash2, Upload } from 'lucide-react';
-import { STAGE_LABEL, STAGE_ORDER } from '../constants';
+import { STAGE_LABEL, STAGE_ORDER } from '../presentation/generationStages';
 import { PageHero } from './PageHero';
 
 interface HistoryPageProps {

@@ -8,6 +8,7 @@ const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, '..');
 const dataDir = resolve(projectRoot, 'data');
 const avatarDir = resolve(dataDir, 'reference-avatars');
+const magazineDir = resolve(dataDir, 'reference-magazine');
 
 process.chdir(projectRoot);
 process.env.GITHUB_ACTIONS = 'true';
@@ -49,45 +50,84 @@ const extFromMime = (mime) => {
   return 'png';
 };
 
-const saveAvatar = async (voice, index) => {
-  const avatar = voice.avatar;
-  if (!avatar?.imageUrl) return null;
+const extFromBuffer = (buffer) => {
+  if (buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg';
+  if (
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return 'webp';
+  return null;
+};
 
+const loadImageBuffer = async (imageUrl, label) => {
   let buffer;
   let ext = 'png';
 
-  const dataMatch = avatar.imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  const dataMatch = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
   if (dataMatch) {
-    ext = extFromMime(dataMatch[1]);
     buffer = Buffer.from(dataMatch[2], 'base64');
-  } else if (/^https?:\/\//.test(avatar.imageUrl)) {
-    const response = await fetch(avatar.imageUrl);
-    if (!response.ok) throw new Error(`Avatar fetch failed ${response.status} for ${voice.name}`);
+    ext = extFromBuffer(buffer) || extFromMime(dataMatch[1]);
+  } else if (/^https?:\/\//.test(imageUrl)) {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`Image fetch failed ${response.status} for ${label}`);
     const mime = response.headers.get('content-type') || 'image/png';
-    ext = extFromMime(mime);
     buffer = Buffer.from(await response.arrayBuffer());
+    ext = extFromBuffer(buffer) || extFromMime(mime);
   } else {
     return null;
   }
 
+  return { buffer, ext };
+};
+
+const saveAvatar = async (voice, index) => {
+  const avatar = voice.avatar;
+  if (!avatar?.imageUrl) return null;
+
+  const loaded = await loadImageBuffer(avatar.imageUrl, voice.name);
+  if (!loaded) return null;
+
   const modelSlug = slugify(avatar.model || 'image-model', 'image-model');
   const voiceSlug = slugify(voice.name || voice.id, `voice-${index + 1}`);
-  const filename = `${String(index + 1).padStart(2, '0')}-${voiceSlug}-${modelSlug}.${ext}`;
+  const filename = `${String(index + 1).padStart(2, '0')}-${voiceSlug}-${modelSlug}.${loaded.ext}`;
   const filePath = resolve(avatarDir, filename);
-  writeFileSync(filePath, buffer);
+  writeFileSync(filePath, loaded.buffer);
 
   return {
     identifier: `voice${index + 1}Avatar`,
     importPath: `./${relative(dataDir, filePath).replace(/\\/g, '/')}`,
     placeholder: `__REFERENCE_AVATAR_${index + 1}__`,
-    bytes: buffer.length,
+    bytes: loaded.buffer.length,
   };
 };
 
-const toTsObject = (value, avatarImports) => {
+const saveMagazineImage = async (result, slot) => {
+  const image = result.magazineImages?.[slot];
+  if (!image?.imageUrl) return null;
+
+  const loaded = await loadImageBuffer(image.imageUrl, `magazine ${slot}`);
+  if (!loaded) return null;
+
+  const modelSlug = slugify(image.model || 'image-model', 'image-model');
+  const topicSlug = slugify(result.philosophical_title || result.topic || 'sample', 'sample');
+  const filename = `${slot}-${topicSlug}-${modelSlug}.${loaded.ext}`;
+  const filePath = resolve(magazineDir, filename);
+  writeFileSync(filePath, loaded.buffer);
+
+  const identifier = slot === 'cover' ? 'magazineCoverImage' : 'magazineConclusionImage';
+  return {
+    identifier,
+    importPath: `./${relative(dataDir, filePath).replace(/\\/g, '/')}`,
+    placeholder: `__REFERENCE_MAGAZINE_${slot.toUpperCase()}__`,
+    bytes: loaded.buffer.length,
+  };
+};
+
+const toTsObject = (value, assetImports) => {
   let source = JSON.stringify(value, null, 2);
-  for (const avatarImport of avatarImports) {
-    source = source.replace(`"${avatarImport.placeholder}"`, avatarImport.identifier);
+  for (const assetImport of assetImports) {
+    source = source.replace(`"${assetImport.placeholder}"`, assetImport.identifier);
   }
   return source;
 };
@@ -102,6 +142,7 @@ const server = await createServer({
 
 try {
   mkdirSync(avatarDir, { recursive: true });
+  mkdirSync(magazineDir, { recursive: true });
 
   const { analyzeTopic } = await server.ssrLoadModule('/services/sophiaService.ts');
 
@@ -143,6 +184,16 @@ try {
     }
   }
 
+  const magazineImports = [];
+  for (const slot of ['cover', 'conclusion']) {
+    const magazineImport = await saveMagazineImage(result, slot);
+    if (magazineImport) {
+      result.magazineImages[slot].imageUrl = magazineImport.placeholder;
+      magazineImports.push(magazineImport);
+      console.log(`Magazine image saved: ${magazineImport.importPath} (${magazineImport.bytes} bytes)`);
+    }
+  }
+
   const entry = {
     id: 'preset-feminism',
     topic: result.topic,
@@ -156,11 +207,12 @@ try {
   };
 
   const imports = [
-    "import { HistoryEntry } from '../types';",
+    "import type { HistoryEntry } from '../types/storage';",
+    ...magazineImports.map((magazineImport) => `import ${magazineImport.identifier} from '${magazineImport.importPath}';`),
     ...avatarImports.map((avatarImport) => `import ${avatarImport.identifier} from '${avatarImport.importPath}';`),
   ].join('\n');
 
-  const content = `${imports}\n\nexport const PRELOADED_HISTORY_ENTRY: HistoryEntry = ${toTsObject(entry, avatarImports)};\n`;
+  const content = `${imports}\n\nexport const PRELOADED_HISTORY_ENTRY: HistoryEntry = ${toTsObject(entry, [...magazineImports, ...avatarImports])};\n`;
   writeFileSync(resolve(dataDir, 'preloadedHistory.ts'), content);
   console.log('Updated data/preloadedHistory.ts');
 } finally {

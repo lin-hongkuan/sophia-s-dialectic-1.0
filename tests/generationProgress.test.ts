@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { estimateGenerationProgress } from '../utils/generationProgress';
-import type { GenerationLogEntry, GenerationProgress } from '../types';
+import type { GenerationLogEntry, GenerationProgress } from '../types/pipeline';
 
 const startedAt = '2026-05-08T12:00:00.000Z';
 const now = Date.parse('2026-05-08T12:01:00.000Z');

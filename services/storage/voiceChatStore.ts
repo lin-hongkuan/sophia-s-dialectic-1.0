@@ -1,4 +1,4 @@
-import { Message } from '../types';
+import type { Message } from '../../types/chat';
 
 const KEY = 'sophia.voiceChats.v1';
 const MAX_MESSAGES_PER_VOICE = 60;

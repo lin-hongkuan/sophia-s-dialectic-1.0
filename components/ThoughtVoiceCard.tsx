@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { AnalysisResult, ThoughtVoice } from '../types';
+import React, { useEffect, useState } from 'react';
+import type { AnalysisResult, ThoughtVoice } from '../types/domain';
 import { AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronUp, ImageOff, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
 import VoiceChatModal from './VoiceChatModal';
-import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../constants';
+import { getAvatarFallbackMessage, getSymbolicAvatar, resolveThoughtVoiceAvatar } from './thoughtVoice/avatar';
+import { useCollapsibleContent } from './thoughtVoice/useCollapsibleContent';
+import { VoiceAvatar } from './thoughtVoice/VoiceAvatar';
 
 interface ThoughtVoiceCardProps {
   data: ThoughtVoice;
@@ -17,79 +19,13 @@ interface ThoughtVoiceCardProps {
   isRegeneratingAvatar?: boolean;
 }
 
-const kindLabel: Record<string, string> = {
+const kindLabel: Record<ThoughtVoice['kind'], string> = {
   philosopher: '哲学家',
   school: '思想流派',
   concept: '核心概念',
   position: '现实立场',
   contemporary: '当代批评',
 };
-
-interface TrustedPortrait {
-  src: string;
-  alt: string;
-  attribution?: string;
-}
-
-type ThoughtVoiceAvatar =
-  | {
-    type: 'generated';
-    src: string;
-    alt: string;
-    title: string;
-  }
-  | {
-    type: 'portrait';
-    src: string;
-    alt: string;
-    title: string;
-  }
-  | {
-    type: 'symbolic';
-    initials: string;
-    symbol: string;
-    eraLabel: string;
-    background: string;
-    foreground: string;
-    title: string;
-  };
-
-// Only verified local or curated portrait assets should be added here; otherwise use symbolic avatars.
-const TRUSTED_PORTRAITS: Record<string, TrustedPortrait> = {};
-
-const VOICE_KIND_SYMBOL: Record<ThoughtVoice['kind'], string> = {
-  philosopher: 'ϕ',
-  school: '§',
-  concept: '◇',
-  position: '↔',
-  contemporary: '⁕',
-};
-
-const AVATAR_PALETTES = [
-  { background: 'linear-gradient(135deg, #F2F0EB 0%, #D1CCC0 100%)', foreground: '#2C2A26', symbol: '∴' },
-  { background: 'linear-gradient(135deg, #F6F1E7 0%, #D8CDB8 100%)', foreground: '#4A3F2F', symbol: '◇' },
-  { background: 'linear-gradient(135deg, #EEE9E2 0%, #BEB7AA 100%)', foreground: '#34302A', symbol: '§' },
-  { background: 'linear-gradient(135deg, #ECEFF1 0%, #C8CDD1 100%)', foreground: '#30343A', symbol: '※' },
-  { background: 'linear-gradient(135deg, #F3EEE7 0%, #CFC5B7 100%)', foreground: '#3C352C', symbol: 'ϕ' },
-];
-
-const ERA_RULES = [
-  { pattern: /苏格拉底|柏拉图|亚里士多德|斯多葛|伊壁鸠鲁|犬儒|赫拉克利特|巴门尼德|Socrates|Plato|Aristotle|Stoic|Epicur|古希腊|古典/i, label: '古典' },
-  { pattern: /奥古斯丁|阿奎那|经院|神学|Augustine|Aquinas|Scholastic|中世纪/i, label: '中世纪' },
-  { pattern: /笛卡尔|斯宾诺莎|洛克|休谟|卢梭|康德|黑格尔|Descartes|Spinoza|Locke|Hume|Rousseau|Kant|Hegel|启蒙|理性主义|经验主义|德国观念论|近代/i, label: '近代' },
-  { pattern: /尼采|马克思|克尔凯郭尔|叔本华|海德格尔|萨特|波伏娃|维特根斯坦|福柯|德里达|罗尔斯|阿伦特|Nietzsche|Marx|Kierkegaard|Schopenhauer|Heidegger|Sartre|Beauvoir|Wittgenstein|Foucault|Derrida|Rawls|Arendt|现代|当代|后现代|存在主义|现象学|分析哲学|批判理论/i, label: '现代' },
-];
-
-const FALLBACK_ERA_LABEL: Record<ThoughtVoice['kind'], string> = {
-  philosopher: '思想',
-  school: '流派',
-  concept: '概念',
-  position: '立场',
-  contemporary: '当代',
-};
-
-const MOBILE_PREVIEW_HEIGHT = 640;
-const DESKTOP_PREVIEW_HEIGHT = 760;
 
 const QUOTE_PAIRS: Array<[string, string]> = [
   ['「', '」'],
@@ -102,8 +38,6 @@ const QUOTE_PAIRS: Array<[string, string]> = [
 
 const QUOTE_EDGE_CHARS = '「」『』“”‘’\"\'';
 const quoteEdgePattern = new RegExp(`^[${QUOTE_EDGE_CHARS}]+|[${QUOTE_EDGE_CHARS}]+$`, 'g');
-const CJK_INITIALS_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/u;
-const AVATAR_IMAGE_LOAD_FALLBACK_MESSAGE = '头像图像加载失败，已使用符号占位。';
 
 const normalizeQuoteText = (value?: string) => {
   if (!value) return '';
@@ -129,99 +63,16 @@ const normalizeQuoteText = (value?: string) => {
   return text.replace(quoteEdgePattern, '').trim();
 };
 
-const canonicalAvatarName = (name: string) =>
-  name
-    .normalize('NFKC')
-    .replace(/[（(].*?[）)]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-
-const hashText = (value: string) =>
-  Array.from(value).reduce((hash, char) => ((hash << 5) - hash + (char.codePointAt(0) || 0)) >>> 0, 0);
-
-const getInitials = (name: string) => {
-  const cleaned = name
-    .normalize('NFKC')
-    .replace(/[（(].*?[）)]/g, '')
-    .replace(/[-–—_/·•.,，。:：;；!?！？'"“”‘’[\]{}]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const parts = cleaned.split(' ').filter(Boolean);
-  const latinParts = parts.filter((part) => /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(part));
-  if (latinParts.length >= 2) {
-    return `${latinParts[0][0]}${latinParts[latinParts.length - 1][0]}`.toUpperCase();
-  }
-
-  const compact = cleaned.replace(/\s+/g, '');
-  const initials = Array.from(compact).slice(0, 2).join('');
-  return initials ? initials.toUpperCase() : '∴';
-};
-
-const getSymbolicInitialsClassName = (initials: string) =>
-  CJK_INITIALS_PATTERN.test(initials)
-    ? 'font-sans text-[1.35rem] leading-none sm:text-2xl md:text-3xl lg:text-5xl xl:text-6xl'
-    : 'font-serif text-2xl leading-none sm:text-4xl md:text-5xl lg:text-7xl xl:text-8xl';
-
-const getAvatarFallbackMessage = (voice: ThoughtVoice, imageLoadFailed: boolean) => {
-  if (voice.avatarError !== undefined) {
-    return voice.avatarError.trim() || GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE;
-  }
-
-  return imageLoadFailed ? AVATAR_IMAGE_LOAD_FALLBACK_MESSAGE : '';
-};
-
-const getEraLabel = (voice: ThoughtVoice) => {
-  const source = [voice.name, voice.school, voice.role, voice.coreConcept].filter(Boolean).join(' ');
-  return ERA_RULES.find(({ pattern }) => pattern.test(source))?.label || FALLBACK_ERA_LABEL[voice.kind];
-};
-
-const getSymbolicAvatar = (voice: ThoughtVoice, index: number): Extract<ThoughtVoiceAvatar, { type: 'symbolic' }> => {
-  const palette = AVATAR_PALETTES[hashText(`${voice.name}-${voice.kind}-${index}`) % AVATAR_PALETTES.length];
-  const eraLabel = getEraLabel(voice);
-  return {
-    type: 'symbolic',
-    initials: getInitials(voice.name),
-    symbol: VOICE_KIND_SYMBOL[voice.kind] || palette.symbol,
-    eraLabel,
-    background: palette.background,
-    foreground: palette.foreground,
-    title: `符号头像：${voice.name}。使用姓名缩写、稳定色板与${eraLabel}标签生成，不代表真人肖像。`,
-  };
-};
-
-const getThoughtVoiceAvatar = (voice: ThoughtVoice, index: number): ThoughtVoiceAvatar => {
-  if (voice.avatar?.imageUrl) {
-    return {
-      type: 'generated',
-      src: voice.avatar.imageUrl,
-      alt: voice.avatar.alt || `${voice.name} 的思想声音头像`,
-      title: `${voice.name} · 由 ${voice.avatar.model} 生成的竖版思想声音头像。`,
-    };
-  }
-
-  const portrait = TRUSTED_PORTRAITS[canonicalAvatarName(voice.name)];
-  if (portrait) {
-    return {
-      type: 'portrait',
-      src: portrait.src,
-      alt: portrait.alt,
-      title: `${voice.name} 的已核验肖像${portrait.attribution ? `（${portrait.attribution}）` : ''}`,
-    };
-  }
-
-  return getSymbolicAvatar(voice, index);
-};
-
 const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result, onRetry, isRetrying = false, retryDisabled = false, onRegenerateAvatar, isRegeneratingAvatar = false }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [previewHeight, setPreviewHeight] = useState(() => typeof window === 'undefined' ? DESKTOP_PREVIEW_HEIGHT : window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
-  const [contentHeight, setContentHeight] = useState(previewHeight);
   const [chatOpen, setChatOpen] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const avatar = avatarFailed ? getSymbolicAvatar(data, index) : getThoughtVoiceAvatar(data, index);
+  const generatedAvatarUrl = data.avatar?.imageUrl || '';
+
+  useEffect(() => {
+    if (generatedAvatarUrl) setAvatarFailed(false);
+  }, [generatedAvatarUrl]);
+
+  const avatar = avatarFailed ? getSymbolicAvatar(data, index) : resolveThoughtVoiceAvatar(data, index);
   const isGenerating = data.status === 'generating';
   const isQueued = data.status === 'queued';
   const isFailed = data.status === 'failed';
@@ -232,53 +83,19 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
   const avatarFallbackMessage = avatar.type === 'symbolic'
     ? getAvatarFallbackMessage(data, avatarFailed)
     : '';
-  const symbolicAvatarLabel = avatarFallbackMessage ? `${avatar.title} ${avatarFallbackMessage}` : avatar.title;
 
-  useEffect(() => {
-    const updatePreviewHeight = () => setPreviewHeight(window.innerWidth < 768 ? MOBILE_PREVIEW_HEIGHT : DESKTOP_PREVIEW_HEIGHT);
-    updatePreviewHeight();
-    window.addEventListener('resize', updatePreviewHeight);
-    return () => window.removeEventListener('resize', updatePreviewHeight);
-  }, []);
-
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-
-    let frameId = 0;
-    const updateHeight = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        setContentHeight((current) => {
-          const next = content.scrollHeight;
-          return Math.abs(current - next) > 1 ? next : current;
-        });
-      });
-    };
-
-    updateHeight();
-    if (typeof ResizeObserver === 'undefined') {
-      return () => window.cancelAnimationFrame(frameId);
-    }
-
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(content);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      observer.disconnect();
-    };
-  }, [hasArgument, previewHeight]);
-
-  const isCollapsible = contentHeight > previewHeight + 40;
   // While text is actively streaming in we don't lock the wrapper to a measured height or animate
   // it: ResizeObserver fires every ~120ms as new chunks land, and a 700ms height tween chasing
   // that moving target causes the card (and everything below it) to oscillate up and down.
   // Once status flips to 'completed' the height-tween + collapsibility UI takes over.
   const isStreaming = isGenerating && hasArgument;
-  const visibleContentHeight = isStreaming ? contentHeight : (isExpanded || !isCollapsible ? contentHeight : previewHeight);
-
-  const toggleExpanded = () => setIsExpanded((current) => !current);
+  const {
+    contentRef,
+    isExpanded,
+    isCollapsible,
+    toggleExpanded,
+    visibleContentHeight,
+  } = useCollapsibleContent({ hasContent: hasArgument, isStreaming });
 
   const metaPanel = (
     <aside className={`relative lg:w-[27%] xl:w-[24%] shrink-0 bg-museum-50/72 md:backdrop-blur-[4px] border-museum-200 p-4 md:p-6 lg:p-7 xl:p-8 flex flex-col ${isReversed ? 'lg:border-l' : 'lg:border-r'}`}>
@@ -304,65 +121,14 @@ const ThoughtVoiceCard: React.FC<ThoughtVoiceCardProps> = ({ data, index, result
         </div>
 
         <div className="flex lg:block items-center gap-4 md:gap-5">
-          <div className="relative group/avatar w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 lg:w-full lg:h-[15rem] xl:h-[17rem] overflow-hidden border border-museum-200 bg-museum-100 shrink-0 lg:mb-6 shadow-sm ring-2 ring-white/55 md:ring-4 [contain:layout_paint]">
-            {avatar.type === 'generated' ? (
-              <img
-                src={avatar.src}
-                alt={avatar.alt}
-                title={avatar.title}
-                width={320}
-                height={408}
-                loading="lazy"
-                decoding="async"
-                onError={() => setAvatarFailed(true)}
-                className="w-full h-full object-cover [filter:saturate(0.86)_contrast(0.95)]"
-              />
-            ) : avatar.type === 'portrait' ? (
-              <img
-                src={avatar.src}
-                alt={avatar.alt}
-                title={avatar.title}
-                width={320}
-                height={408}
-                loading="lazy"
-                decoding="async"
-                onError={() => setAvatarFailed(true)}
-                className="w-full h-full object-cover grayscale opacity-90"
-              />
-            ) : (
-              <div
-                className="relative w-full h-full overflow-hidden flex items-center justify-center"
-                role="img"
-                aria-label={symbolicAvatarLabel}
-                title={symbolicAvatarLabel}
-                style={{ background: avatar.background, color: avatar.foreground }}
-              >
-                <span className="absolute inset-0 bg-[radial-gradient(circle_at_32%_24%,rgba(255,255,255,0.88),transparent_34%),radial-gradient(circle_at_72%_78%,rgba(44,42,38,0.12),transparent_35%)]" aria-hidden="true" />
-                <span className="absolute inset-[7px] hidden border border-white/65 shadow-[inset_0_0_0_1px_rgba(44,42,38,0.08)] lg:block" aria-hidden="true" />
-                <span className="absolute inset-x-7 top-1/2 hidden h-px -translate-y-1/2 bg-museum-900/10 lg:block" aria-hidden="true" />
-                <span className="absolute inset-y-7 left-1/2 hidden w-px -translate-x-1/2 bg-museum-900/10 lg:block" aria-hidden="true" />
-                <span className="absolute top-3 right-3 hidden font-serif text-xl opacity-35 lg:block xl:text-2xl" aria-hidden="true">{avatar.symbol}</span>
-                <span className={`relative z-10 flex max-w-[78%] items-center justify-center text-center font-bold text-museum-900/90 drop-shadow-[0_8px_20px_rgba(44,42,38,0.16)] ${getSymbolicInitialsClassName(avatar.initials)}`} aria-hidden="true">{avatar.initials}</span>
-                {!avatarFallbackMessage && (
-                  <span className="absolute bottom-3 left-1/2 hidden -translate-x-1/2 border border-white/60 bg-white/60 px-2.5 py-1 text-[9px] font-mono uppercase text-museum-800 backdrop-blur-[2px] lg:block" aria-hidden="true">
-                    {avatar.eraLabel}
-                  </span>
-                )}
-              </div>
-            )}
-            {onRegenerateAvatar && data.status === 'completed' && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onRegenerateAvatar(data.id); }}
-                disabled={isRegeneratingAvatar}
-                aria-label={`重新生成 ${data.name} 的头像`}
-                title="重新生成头像"
-                className="absolute bottom-1.5 right-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-museum-200/70 bg-white/55 text-museum-700 opacity-0 backdrop-blur-sm transition-all duration-300 hover:bg-white hover:opacity-100 focus-visible:opacity-100 group-hover/avatar:opacity-45 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isRegeneratingAvatar ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              </button>
-            )}
-          </div>
+          <VoiceAvatar
+            voice={data}
+            avatar={avatar}
+            fallbackMessage={avatarFallbackMessage}
+            onImageError={() => setAvatarFailed(true)}
+            onRegenerateAvatar={onRegenerateAvatar}
+            isRegeneratingAvatar={isRegeneratingAvatar}
+          />
           <div className="min-w-0">
             <p className="text-xs font-mono uppercase tracking-[0.28em] text-museum-400 mb-2">Voice {String(index + 1).padStart(2, '0')}</p>
             <h3 className="font-serif text-2xl md:text-4xl xl:text-[2.55rem] font-bold text-museum-900 leading-tight break-words">{data.name}</h3>
