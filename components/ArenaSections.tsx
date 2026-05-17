@@ -502,17 +502,31 @@ export const SynthesisSection: React.FC<{ data: AnalysisResult }> = ({ data }) =
       <MagazineImageSection data={data} slot="conclusion" />
 
       {data.conclusion.summary && (
-        <div className="bg-museum-900 text-museum-50 shadow-lg p-5 md:p-12">
-          <p className="text-xs uppercase tracking-widest text-museum-300 mb-4">Synthesis</p>
-          <h2 className="font-serif text-3xl md:text-4xl mb-6">暂时的合流</h2>
-          <p className="leading-loose whitespace-pre-line text-museum-100 mb-8">{data.conclusion.summary}</p>
-          {data.conclusion.openQuestion && (
-            <div className="bg-white/10 p-6 mb-5">
-              <p className="text-xs uppercase tracking-widest text-museum-300 mb-2">仍然悬着的问题</p>
-              <p className="font-serif text-2xl font-light leading-loose tracking-wider">{data.conclusion.openQuestion}</p>
-            </div>
-          )}
-          {data.conclusion.realLifeReturn && <p className="text-museum-200 leading-relaxed">{data.conclusion.realLifeReturn}</p>}
+        <div className="relative bg-museum-900 text-museum-50 shadow-lg overflow-hidden">
+          <div
+            className="absolute inset-0 mix-blend-overlay opacity-10 pointer-events-none"
+            aria-hidden="true"
+            style={{
+              backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+            }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-br from-museum-900/85 via-museum-800/70 to-museum-900/90 pointer-events-none" aria-hidden="true" />
+          <span aria-hidden="true" className="absolute left-0 top-0 w-6 h-px bg-museum-500 z-10" />
+          <span aria-hidden="true" className="absolute left-0 top-0 h-6 w-px bg-museum-500 z-10" />
+          <span aria-hidden="true" className="absolute right-0 bottom-0 w-6 h-px bg-museum-500 z-10" />
+          <span aria-hidden="true" className="absolute right-0 bottom-0 h-6 w-px bg-museum-500 z-10" />
+          <div className="relative z-10 p-5 md:p-12">
+            <p className="text-xs uppercase tracking-widest text-museum-300 mb-4">Synthesis</p>
+            <h2 className="font-serif text-3xl md:text-4xl mb-6">暂时的合流</h2>
+            <p className="leading-loose whitespace-pre-line text-museum-100 mb-8">{data.conclusion.summary}</p>
+            {data.conclusion.openQuestion && (
+              <div className="bg-white/10 p-6 mb-5">
+                <p className="text-xs uppercase tracking-widest text-museum-300 mb-2">仍然悬着的问题</p>
+                <p className="font-serif text-2xl font-light leading-loose tracking-wider">{data.conclusion.openQuestion}</p>
+              </div>
+            )}
+            {data.conclusion.realLifeReturn && <p className="text-museum-200 leading-relaxed">{data.conclusion.realLifeReturn}</p>}
+          </div>
         </div>
       )}
     </section>
