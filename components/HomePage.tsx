@@ -99,13 +99,13 @@ const HomePage: React.FC<HomePageProps> = ({
           isOffline ? '当前离线 · 暂时无法生成新分析' :
           activeRunIsRunning ? '已有问题正在生成。' : '输入一个困惑...'
         }
-        className="relative w-full px-5 py-4 pr-16 md:px-8 md:py-6 md:pr-20 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-300 focus:ring-0 focus:shadow-[0_8px_40px_rgb(0,0,0,0.08)] transition-all duration-300 placeholder:text-museum-300 font-serif text-left backdrop-blur-md disabled:opacity-70"
+        className="relative w-full px-5 py-4 pr-16 md:px-8 md:py-6 md:pr-20 text-base md:text-xl rounded-full bg-white/90 border-2 border-museum-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:outline-none focus:border-museum-400 focus:ring-4 focus:ring-museum-400/15 focus:shadow-[0_14px_46px_rgb(0,0,0,0.10)] transition-all duration-300 placeholder:text-museum-300 font-serif text-left backdrop-blur-md disabled:opacity-70"
         disabled={isOffline || activeRunIsRunning || isReframing}
       />
       <button
         type="submit"
         disabled={isOffline || !topic || activeRunIsRunning || isReframing}
-        className="absolute right-1.5 top-1.5 md:right-2 md:top-2 h-[calc(100%-12px)] md:h-[calc(100%-16px)] aspect-square bg-museum-900 text-museum-50 rounded-full flex items-center justify-center hover:bg-black transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group-hover:shadow-lg"
+        className="absolute right-1.5 top-1.5 md:right-2 md:top-2 h-[calc(100%-12px)] md:h-[calc(100%-16px)] aspect-square bg-museum-900 text-museum-50 rounded-full flex items-center justify-center hover:bg-black transition-all hover:scale-105 active:scale-95 active:shadow-museum-press disabled:opacity-50 disabled:cursor-not-allowed group-hover:shadow-lg"
       >
         {activeRunIsRunning || isReframing ? <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ArrowRight className="w-5 h-5 md:w-6 md:h-6" />}
       </button>
