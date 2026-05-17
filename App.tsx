@@ -186,6 +186,7 @@ const App: React.FC = () => {
   const showSettings = view === 'settings';
   const showResult = view === 'result';
   const showConcept = view === 'concept';
+  const currentPage = showHome ? 'home' : showHistory ? 'history' : showManifesto ? 'manifesto' : showSettings ? 'settings' : null;
   const isViewingActiveRun = showResult && selectedSource === 'active';
   const showActiveBanner = showHome && !!activeRun && !isViewingActiveRun;
   const showAnnouncement = announcementOpen && !reframeState?.open;
@@ -237,6 +238,7 @@ const App: React.FC = () => {
   return (
     <AppShell
       showHome={showHome}
+      currentPage={currentPage}
       isOffline={isOffline}
       mainRef={mainRef}
       errorBoundaryResetKey={`${view}-${selectedSource || 'none'}-${displayedResult?.id || 'empty'}`}

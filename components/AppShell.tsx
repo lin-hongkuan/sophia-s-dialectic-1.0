@@ -10,6 +10,7 @@ import AppErrorBoundary from './AppErrorBoundary';
 interface AppShellProps {
   children: React.ReactNode;
   showHome: boolean;
+  currentPage: 'home' | 'history' | 'manifesto' | 'settings' | null;
   isOffline: boolean;
   mainRef: React.RefObject<HTMLElement | null>;
   errorBoundaryResetKey: string;
@@ -30,9 +31,17 @@ interface AppShellProps {
   onReframeCancel: () => void;
 }
 
+const navButtonClass = (isActive: boolean) =>
+  `inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] uppercase tracking-widest font-bold transition-colors sm:px-3.5 sm:text-[10px] md:relative md:min-h-0 md:px-0 md:py-0 md:text-xs ${
+    isActive
+      ? 'bg-museum-900 text-museum-50 hover:text-museum-50 md:bg-transparent md:text-museum-900 md:after:absolute md:after:-bottom-1.5 md:after:left-1/2 md:after:-translate-x-1/2 md:after:h-px md:after:w-5 md:after:bg-museum-800'
+      : 'text-museum-600 hover:text-museum-900'
+  }`;
+
 const AppShell: React.FC<AppShellProps> = ({
   children,
   showHome,
+  currentPage,
   isOffline,
   mainRef,
   errorBoundaryResetKey,
@@ -79,32 +88,56 @@ const AppShell: React.FC<AppShellProps> = ({
             <p className="mt-1 hidden text-[9px] font-mono uppercase tracking-[0.24em] text-museum-500 sm:block md:text-[10px]">Dialectic Engine</p>
           </div>
         </button>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto pl-2 md:flex-none md:gap-6 md:overflow-visible md:pl-0">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto pl-2 md:flex-none md:gap-3 md:overflow-visible md:pl-0">
           {announcement.enabled && (
             <button
               type="button"
               onClick={onOpenAnnouncement}
               aria-label="查看公告"
               title="查看公告"
-              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-museum-600 hover:text-museum-900 transition-colors sm:px-3 md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0"
+              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-full border border-museum-200/80 bg-white/55 px-2.5 py-2 text-museum-600 hover:text-museum-900 transition-colors backdrop-blur-sm sm:px-3 md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none"
             >
               <Megaphone className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden="true" />
               <span className="sr-only">查看公告</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={onHome}
-            aria-label="回到首页"
-            title="回到首页"
-            className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs"
-          >
-            <Home className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden="true" />
-            <span className="hidden md:inline">Home</span>
-          </button>
-          <button type="button" onClick={onHistory} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">History</button>
-          <button type="button" onClick={onManifesto} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Manifesto</button>
-          <button type="button" onClick={onSettings} className="inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-museum-200/80 bg-white/45 px-2.5 py-2 text-[9px] uppercase tracking-widest font-bold text-museum-600 hover:text-museum-900 transition-colors sm:px-3.5 sm:text-[10px] md:min-h-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-xs">Settings</button>
+          <div className="inline-flex items-center gap-1 rounded-full border border-museum-200/80 bg-white/55 p-0.5 backdrop-blur-sm md:gap-6 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+            <button
+              type="button"
+              onClick={onHome}
+              aria-label="回到首页"
+              aria-current={currentPage === 'home' ? 'page' : undefined}
+              title="回到首页"
+              className={navButtonClass(currentPage === 'home')}
+            >
+              <Home className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden="true" />
+              <span className="hidden md:inline">Home</span>
+            </button>
+            <button
+              type="button"
+              onClick={onHistory}
+              aria-current={currentPage === 'history' ? 'page' : undefined}
+              className={navButtonClass(currentPage === 'history')}
+            >
+              History
+            </button>
+            <button
+              type="button"
+              onClick={onManifesto}
+              aria-current={currentPage === 'manifesto' ? 'page' : undefined}
+              className={navButtonClass(currentPage === 'manifesto')}
+            >
+              Manifesto
+            </button>
+            <button
+              type="button"
+              onClick={onSettings}
+              aria-current={currentPage === 'settings' ? 'page' : undefined}
+              className={navButtonClass(currentPage === 'settings')}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       </div>
     </nav>
