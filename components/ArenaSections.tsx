@@ -14,7 +14,7 @@ export const modeIcon: Record<string, React.ReactNode> = {
 };
 
 const FrameNode: React.FC<{ label: string; text: string; emphasis?: boolean }> = ({ label, text, emphasis }) => (
-  <div className={`relative z-10 bg-white/90 backdrop-blur-sm border ${emphasis ? 'border-museum-800 shadow-md' : 'border-museum-200 shadow-sm'} p-4 md:p-7`}>
+  <div className={`relative z-10 bg-white/90 backdrop-blur-sm border ${emphasis ? 'border-museum-800 shadow-museum-lift ring-1 ring-museum-800/15' : 'border-museum-200 shadow-museum-soft'} p-4 md:p-7 transition-all duration-500 ease-out hover:-translate-y-0.5 hover:shadow-museum-lift`}>
     <p className="text-[10px] uppercase tracking-[0.24em] text-museum-400 mb-3">{label}</p>
     <p className={`${emphasis ? 'font-serif text-xl md:text-3xl text-museum-900' : 'font-serif text-lg md:text-2xl text-museum-800'} leading-relaxed`}>
       {text}
@@ -146,7 +146,7 @@ export const QuestionMapSection: React.FC<{ data: AnalysisResult }> = ({ data })
       {data.questionFrame.keywords.length > 0 && (
         <div className="mt-8 pt-6 border-t border-museum-100 flex flex-wrap justify-center gap-2">
           {data.questionFrame.keywords.map((keyword) => (
-            <span key={keyword} className="px-3 py-1 bg-museum-100 text-museum-900 text-xs rounded-full font-mono uppercase tracking-wider">{keyword}</span>
+            <span key={keyword} className="px-3 py-1 bg-museum-100/95 text-museum-900 text-xs rounded-full font-mono uppercase tracking-wider shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">{keyword}</span>
           ))}
         </div>
       )}
@@ -180,7 +180,7 @@ export const ConceptNotesSection: React.FC<ConceptNotesSectionProps> = ({ data, 
       </button>
       <div className="px-6 md:px-8 pb-7 flex flex-wrap gap-2">
         {data.keywords.map((keyword) => (
-          <span key={keyword.id} className="px-3 py-1 bg-museum-50 border border-museum-100 text-museum-800 text-xs rounded-full font-mono uppercase tracking-wider">{keyword.term}</span>
+          <span key={keyword.id} className="px-3 py-1 bg-museum-50/95 border border-museum-100 text-museum-800 text-xs rounded-full font-mono uppercase tracking-wider shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">{keyword.term}</span>
         ))}
       </div>
       {keywordsOpen && (
@@ -228,7 +228,7 @@ export const ProgramStructureSection: React.FC<{ data: AnalysisResult }> = ({ da
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {data.programStructure.map((section, index) => (
-          <div key={section.id} className="bg-white/80 backdrop-blur-sm border border-museum-200 p-4 md:p-6 shadow-sm">
+          <div key={section.id} className="bg-white/80 backdrop-blur-sm border border-museum-200 p-4 md:p-6 shadow-museum-soft transition-all duration-500 ease-out hover:-translate-y-0.5 hover:shadow-museum-lift">
             <p className="font-mono text-xs text-museum-400 mb-3">{String(index + 1).padStart(2, '0')}</p>
             <h3 className="font-serif text-2xl text-museum-900 mb-3">{section.title}</h3>
             <p className="text-museum-800 leading-relaxed">{section.description}</p>
@@ -420,9 +420,9 @@ export const RouteMapSection: React.FC<{ data: AnalysisResult }> = ({ data }) =>
       </div>
       <div className="space-y-4 md:space-y-5">
         {data.routeMap.map((node, index) => (
-          <div key={node.id} className="bg-white/90 backdrop-blur-sm border border-museum-200 p-4 md:p-8 shadow-sm">
+          <div key={node.id} className="bg-white/90 backdrop-blur-sm border border-museum-200 p-4 md:p-8 shadow-museum-soft transition-all duration-500 ease-out hover:-translate-y-0.5 hover:shadow-museum-lift">
             <div className="flex flex-col md:flex-row md:items-start gap-5">
-              <div className="w-12 h-12 rounded-full bg-museum-900 text-museum-50 flex items-center justify-center font-mono shrink-0">{index + 1}</div>
+              <div className="w-12 h-12 rounded-full bg-museum-900 text-museum-50 flex items-center justify-center font-mono shrink-0 ring-2 ring-museum-300/40 ring-offset-2 ring-offset-museum-50">{index + 1}</div>
               <div className="flex-1">
                 <p className="text-xs uppercase tracking-widest text-museum-400 mb-2">{node.role}</p>
                 <h3 className="font-serif text-2xl md:text-3xl text-museum-900 mb-4">{node.title}</h3>
@@ -490,7 +490,7 @@ export const SynthesisSection: React.FC<{ data: AnalysisResult }> = ({ data }) =
           <h2 className="font-serif text-2xl md:text-3xl text-museum-900 mb-6 md:mb-8">他们到底在争什么？</h2>
           <div className="space-y-5">
             {data.tensions.map((tension) => (
-              <div key={tension.id} className="border-l-4 border-museum-800 pl-5 py-1">
+              <div key={tension.id} className="border-l-4 border-museum-800 pl-5 py-2 -mx-2 px-2 rounded-sm transition-colors duration-300 hover:bg-museum-50/50">
                 <h3 className="font-serif text-2xl text-museum-900 mb-2">{tension.title}</h3>
                 <p className="text-museum-800 leading-relaxed">{tension.content}</p>
               </div>
