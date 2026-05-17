@@ -2,10 +2,12 @@ import React from 'react';
 import { Home, Megaphone } from 'lucide-react';
 import type { Announcement } from '../data/announcement';
 import type { ReframeCandidate } from '../services/topicReframe';
+import type { ActiveAnalysisRun } from '../types/storage';
 import DynamicBackground from './DynamicBackground';
 import AnnouncementModal from './AnnouncementModal';
 import TopicReframeDialog from './TopicReframeDialog';
 import AppErrorBoundary from './AppErrorBoundary';
+import GenerationProgressBar from './GenerationProgressBar';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -19,6 +21,7 @@ interface AppShellProps {
   reframeOpen: boolean;
   reframeOriginalTopic: string;
   reframeCandidates: ReframeCandidate[];
+  activeRun: ActiveAnalysisRun | null;
   onHome: () => void;
   onHistory: () => void;
   onManifesto: () => void;
@@ -50,6 +53,7 @@ const AppShell: React.FC<AppShellProps> = ({
   reframeOpen,
   reframeOriginalTopic,
   reframeCandidates,
+  activeRun,
   onHome,
   onHistory,
   onManifesto,
@@ -185,6 +189,8 @@ const AppShell: React.FC<AppShellProps> = ({
       onDismiss={onDismissAnnouncement}
       onCta={onAnnouncementCta}
     />
+
+    <GenerationProgressBar activeRun={activeRun} />
   </div>
 );
 

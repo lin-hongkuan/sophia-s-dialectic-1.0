@@ -247,6 +247,7 @@ const App: React.FC = () => {
       reframeOpen={!!reframeState?.open}
       reframeOriginalTopic={reframeState?.originalTopic || ''}
       reframeCandidates={reframeState?.candidates || []}
+      activeRun={activeRun}
       onHome={goHome}
       onHistory={goHistory}
       onManifesto={goManifesto}

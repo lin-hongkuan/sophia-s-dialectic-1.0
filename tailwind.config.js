@@ -33,6 +33,7 @@ export default {
         'chip-in': 'chip-in 0.4s ease-out both',
         'section-in': 'section-in 0.5s ease-out both',
         'lift-in': 'lift-in 0.55s cubic-bezier(0.22,1,0.36,1) both',
+        'progress-shimmer': 'progress-shimmer 2.4s linear infinite',
       },
       keyframes: {
         'chip-in': {
@@ -46,6 +47,10 @@ export default {
         'lift-in': {
           from: { opacity: '0', transform: 'translateY(14px) scale(0.985)' },
           to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        'progress-shimmer': {
+          '0%':   { transform: 'translateX(-130%)' },
+          '100%': { transform: 'translateX(330%)' },
         },
       },
       boxShadow: {
