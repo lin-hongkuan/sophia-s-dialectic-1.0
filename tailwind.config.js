@@ -32,6 +32,7 @@ export default {
       animation: {
         'chip-in': 'chip-in 0.4s ease-out both',
         'section-in': 'section-in 0.5s ease-out both',
+        'lift-in': 'lift-in 0.55s cubic-bezier(0.22,1,0.36,1) both',
       },
       keyframes: {
         'chip-in': {
@@ -42,6 +43,15 @@ export default {
           from: { opacity: '0', transform: 'translateY(12px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        'lift-in': {
+          from: { opacity: '0', transform: 'translateY(14px) scale(0.985)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+      },
+      boxShadow: {
+        'museum-soft': '0 1px 0 rgba(255,255,255,0.7) inset, 0 10px 30px -18px rgba(44,42,38,0.18)',
+        'museum-lift': '0 1px 0 rgba(255,255,255,0.7) inset, 0 18px 36px -18px rgba(44,42,38,0.28)',
+        'museum-press': 'inset 0 2px 6px rgba(44,42,38,0.12)',
       },
     },
   },

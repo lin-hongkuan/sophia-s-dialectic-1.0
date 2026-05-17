@@ -52,6 +52,19 @@ html {
 :focus-visible {
   outline: 2px solid rgba(74, 70, 63, 0.7);
   outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(74, 70, 63, 0.10);
+}
+
+/* Scroll-reveal: opt-in via .section-reveal + data-revealed toggled by useScrollReveal hook */
+.section-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.55s ease-out, transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.section-reveal[data-revealed="true"] {
+  opacity: 1;
+  transform: none;
 }
 
 /* Respect user preference for reduced motion: disable all animations and shorten transitions
@@ -70,7 +83,14 @@ html {
 
   .animate-fade-in,
   .animate-chip-in,
-  .animate-section-in {
+  .animate-section-in,
+  .animate-lift-in {
     animation: none !important;
+  }
+
+  .section-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
   }
 }
