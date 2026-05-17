@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowRight, BookOpen, ChevronDown, ChevronUp, FlaskConical, ImageOff, LayoutGrid, Layers, MessageSquare, Stethoscope } from 'lucide-react';
 import { GROK_IMAGE_UPSTREAM_UNAVAILABLE_MESSAGE } from '../presentation/imageMessages';
 import type { AnalysisResult, MagazineImageAsset, MagazineImageSlot } from '../types/domain';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 import ThoughtVoiceCard from './ThoughtVoiceCard';
 
 export const modeIcon: Record<string, React.ReactNode> = {
@@ -98,6 +99,7 @@ const MagazineImageFrame: React.FC<{ image?: MagazineImageAsset; slot: MagazineI
 };
 
 export const MagazineImageSection: React.FC<{ data: AnalysisResult; slot: MagazineImageSlot }> = ({ data, slot }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
   const copy = magazineSlotCopy[slot];
   const image = data.magazineImages?.[slot];
   const supportingText = slot === 'cover'
@@ -107,7 +109,7 @@ export const MagazineImageSection: React.FC<{ data: AnalysisResult; slot: Magazi
   if (slot === 'conclusion' && !data.conclusion.summary) return null;
 
   return (
-    <section className="mx-auto mb-7 max-w-6xl md:mb-16">
+    <section ref={revealRef} className="section-reveal mx-auto mb-7 max-w-6xl md:mb-16">
       <div className={`grid grid-cols-1 gap-4 md:gap-6 lg:items-stretch ${slot === 'cover' ? 'lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]' : 'lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]'}`}>
         <div className={slot === 'conclusion' ? 'lg:order-2' : ''}>
           <MagazineImageFrame image={image} slot={slot} />
@@ -125,8 +127,10 @@ export const MagazineImageSection: React.FC<{ data: AnalysisResult; slot: Magazi
   );
 };
 
-export const QuestionMapSection: React.FC<{ data: AnalysisResult }> = ({ data }) => (
-  <section className="max-w-6xl mx-auto mb-7 md:mb-16 bg-white/80 backdrop-blur-md border border-museum-200 shadow-sm overflow-hidden">
+export const QuestionMapSection: React.FC<{ data: AnalysisResult }> = ({ data }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
+  return (
+  <section ref={revealRef} className="section-reveal max-w-6xl mx-auto mb-7 md:mb-16 bg-white/80 backdrop-blur-md border border-museum-200 shadow-sm overflow-hidden">
     <div className="p-5 md:p-10 border-b border-museum-100">
       <span className="text-xs font-mono uppercase tracking-widest text-museum-400">Question Map</span>
       <h2 className="font-serif text-2xl md:text-4xl text-museum-900 mt-3">问题图谱</h2>
@@ -152,7 +156,8 @@ export const QuestionMapSection: React.FC<{ data: AnalysisResult }> = ({ data })
       )}
     </div>
   </section>
-);
+  );
+};
 
 interface ConceptNotesSectionProps {
   data: AnalysisResult;
@@ -162,9 +167,10 @@ interface ConceptNotesSectionProps {
 }
 
 export const ConceptNotesSection: React.FC<ConceptNotesSectionProps> = ({ data, keywordsOpen, onToggle, onOpenConcept }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
   if (data.keywords.length === 0) return null;
   return (
-    <section className="max-w-6xl mx-auto mb-7 md:mb-16 bg-white/85 backdrop-blur-md border border-museum-200 shadow-sm">
+    <section ref={revealRef} className="section-reveal max-w-6xl mx-auto mb-7 md:mb-16 bg-white/85 backdrop-blur-md border border-museum-200 shadow-sm">
       <button
         onClick={onToggle}
         className="w-full p-5 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4 text-left hover:bg-white/60 transition-colors"
@@ -220,9 +226,10 @@ export const ConceptNotesSection: React.FC<ConceptNotesSectionProps> = ({ data, 
 };
 
 export const ProgramStructureSection: React.FC<{ data: AnalysisResult }> = ({ data }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
   if (data.programStructure.length === 0) return null;
   return (
-    <section className="max-w-5xl mx-auto mb-7 md:mb-16">
+    <section ref={revealRef} className="section-reveal max-w-5xl mx-auto mb-7 md:mb-16">
       <div className="text-center mb-5 md:mb-8">
         <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  阅读路径  ——</span>
       </div>
@@ -239,10 +246,14 @@ export const ProgramStructureSection: React.FC<{ data: AnalysisResult }> = ({ da
   );
 };
 
-export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data }) => (
+export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data }) => {
+  const diagnosisRef = useScrollReveal<HTMLElement>();
+  const thoughtExperimentRef = useScrollReveal<HTMLElement>();
+  const seminarMatrixRef = useScrollReveal<HTMLElement>();
+  return (
   <>
     {data.diagnosisFrame && (
-      <section className="max-w-5xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
+      <section ref={diagnosisRef} className="section-reveal max-w-5xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
         <div className="flex items-center gap-3 mb-6">
           <Stethoscope className="w-6 h-6 text-museum-800" />
           <h2 className="font-serif text-3xl text-museum-900">{data.diagnosisFrame.symptomTitle || '哲学门诊'}</h2>
@@ -298,7 +309,7 @@ export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data })
     )}
 
     {data.thoughtExperiment && (
-      <section className="max-w-6xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
+      <section ref={thoughtExperimentRef} className="section-reveal max-w-6xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
         <div className="flex items-center gap-3 mb-5 md:mb-8">
           <FlaskConical className="w-6 h-6 text-museum-800" />
           <h2 className="font-serif text-2xl md:text-3xl text-museum-900">思想实验的现场</h2>
@@ -382,7 +393,7 @@ export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data })
     )}
 
     {data.seminarMatrix && (
-      <section className="max-w-5xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
+      <section ref={seminarMatrixRef} className="section-reveal max-w-5xl mx-auto mb-7 md:mb-16 bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
         <div className="flex items-center gap-3 mb-5 md:mb-6">
           <LayoutGrid className="w-6 h-6 text-museum-800" />
           <h2 className="font-serif text-2xl md:text-3xl text-museum-900">两个基本问题</h2>
@@ -409,12 +420,14 @@ export const ModeSpecificFrames: React.FC<{ data: AnalysisResult }> = ({ data })
       </section>
     )}
   </>
-);
+  );
+};
 
 export const RouteMapSection: React.FC<{ data: AnalysisResult }> = ({ data }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
   if (data.routeMap.length === 0) return null;
   return (
-    <section className="max-w-5xl mx-auto mb-8 md:mb-20">
+    <section ref={revealRef} className="section-reveal max-w-5xl mx-auto mb-8 md:mb-20">
       <div className="text-center mb-5 md:mb-10">
         <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  论证路线图  ——</span>
       </div>
@@ -456,8 +469,10 @@ export const ThoughtVoicesSection: React.FC<ThoughtVoicesSectionProps> = ({
   isAppendingVoice,
   onRegenerateAvatar,
   regeneratingAvatarVoiceId,
-}) => (
-  <section className="mb-8 md:mb-20">
+}) => {
+  const revealRef = useScrollReveal<HTMLElement>();
+  return (
+  <section ref={revealRef} className="section-reveal mb-8 md:mb-20">
     <div className="text-center mb-5 md:mb-12">
       <span className="text-sm font-serif font-light tracking-[0.35em] text-museum-400">——  思想声音  ——</span>
       <h2 className="font-serif text-2xl md:text-4xl text-museum-900 mt-3">几种立场的长篇展开</h2>
@@ -478,13 +493,15 @@ export const ThoughtVoicesSection: React.FC<ThoughtVoicesSectionProps> = ({
       ))}
     </div>
   </section>
-);
+  );
+};
 
 export const SynthesisSection: React.FC<{ data: AnalysisResult }> = ({ data }) => {
+  const revealRef = useScrollReveal<HTMLElement>();
   const hasSynthesis = data.tensions.length > 0 || data.conclusion.summary;
   if (!hasSynthesis) return null;
   return (
-    <section className="max-w-5xl mx-auto mb-8 md:mb-20 space-y-6 md:space-y-8">
+    <section ref={revealRef} className="section-reveal max-w-5xl mx-auto mb-8 md:mb-20 space-y-6 md:space-y-8">
       {data.tensions.length > 0 && (
         <div className="bg-white/90 backdrop-blur-md border border-museum-200 shadow-sm p-5 md:p-10">
           <h2 className="font-serif text-2xl md:text-3xl text-museum-900 mb-6 md:mb-8">他们到底在争什么？</h2>

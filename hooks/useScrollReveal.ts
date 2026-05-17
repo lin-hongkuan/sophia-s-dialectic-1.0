@@ -1,20 +1,24 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /**
- * Toggle `data-revealed="true"` on an element the first time it crosses ~12%
- * into the viewport. Pair with the `.section-reveal` CSS class in `index.css`
- * to fade + slide a section up once it scrolls into view. Already-intersecting
- * elements fire immediately (IntersectionObserver default behavior), so
+ * Returns a callback ref. The first time the attached element crosses ~12%
+ * into the viewport, `data-revealed="true"` is set on it. Pair with the
+ * `.section-reveal` CSS class in `index.css` to fade + slide the section
+ * into view. Already-intersecting elements fire immediately, so
  * above-the-fold sections still get the reveal once on mount.
  *
- * Honors prefers-reduced-motion by marking the element as revealed immediately
- * and skipping observer setup entirely.
+ * Uses a callback ref (not a static useRef) so sections that mount late —
+ * e.g. SynthesisSection appearing only once streaming completes — still
+ * get an observer attached when their DOM node finally arrives.
+ *
+ * Honors prefers-reduced-motion by marking the element as revealed
+ * immediately and skipping observer setup entirely.
  */
 export function useScrollReveal<T extends HTMLElement = HTMLElement>() {
-  const ref = useRef<T | null>(null);
+  const [node, setNode] = useState<T | null>(null);
+  const refCallback = useCallback((value: T | null) => setNode(value), []);
 
   useEffect(() => {
-    const node = ref.current;
     if (!node) return;
 
     const reduced = typeof window !== 'undefined'
@@ -37,7 +41,7 @@ export function useScrollReveal<T extends HTMLElement = HTMLElement>() {
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [node]);
 
-  return ref;
+  return refCallback;
 }
