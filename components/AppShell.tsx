@@ -162,7 +162,11 @@ const AppShell: React.FC<AppShellProps> = ({
       </AppErrorBoundary>
     </main>
 
-    <footer className="py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest relative z-30 opacity-60 hover:opacity-100 transition-opacity">
+    <footer className="relative py-6 md:py-8 text-center text-museum-400 text-[10px] md:text-xs font-mono uppercase tracking-widest z-30 opacity-75 hover:opacity-100 transition-opacity duration-500">
+      <span aria-hidden="true" className="pointer-events-none absolute left-4 top-3 h-2.5 w-px bg-museum-300/80 md:left-6 md:top-4" />
+      <span aria-hidden="true" className="pointer-events-none absolute left-4 top-3 h-px w-2.5 bg-museum-300/80 md:left-6 md:top-4" />
+      <span aria-hidden="true" className="pointer-events-none absolute right-4 bottom-3 h-2.5 w-px bg-museum-300/80 md:right-6 md:bottom-4" />
+      <span aria-hidden="true" className="pointer-events-none absolute right-4 bottom-3 h-px w-2.5 bg-museum-300/80 md:right-6 md:bottom-4" />
       <p>© 2026 Sophia's Dialectic. Powered by Sophia & The Ancients.</p>
     </footer>
 
