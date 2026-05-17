@@ -55,16 +55,16 @@ html {
   box-shadow: 0 0 0 5px rgba(74, 70, 63, 0.10);
 }
 
-/* Scroll-reveal: opt-in via .section-reveal + data-revealed toggled by useScrollReveal hook */
+/* Scroll-reveal: opt-in via .section-reveal + data-revealed toggled by useScrollReveal hook.
+   Deliberately opacity-only — using transform here promotes the section to its own
+   compositing layer, which degrades subpixel antialiasing on Chinese text and makes
+   the body copy look blurry even after the animation ends. */
 .section-reveal {
   opacity: 0;
-  transform: translateY(14px);
-  transition: opacity 0.55s ease-out, transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: opacity, transform;
+  transition: opacity 0.55s ease-out;
 }
 .section-reveal[data-revealed="true"] {
   opacity: 1;
-  transform: none;
 }
 
 /* Respect user preference for reduced motion: disable all animations and shorten transitions
@@ -90,7 +90,6 @@ html {
 
   .section-reveal {
     opacity: 1 !important;
-    transform: none !important;
     transition: none !important;
   }
 }
