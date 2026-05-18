@@ -11,6 +11,7 @@ import {
   NEGATIVE_AVATAR_PROMPT,
   THOUGHT_VOICE_AVATAR_STYLE,
   VOICE_KIND_AVATAR_SUBJECT,
+  DEFAULT_MAGAZINE_IMAGE_BRIEF_SYSTEM_PROMPT,
   resolveHistoricalPhilosopherAvatarStyle,
   resolveHistoricalPhilosopherNegativeAvatarPrompt,
   resolveNegativeAvatarPrompt,
@@ -711,36 +712,100 @@ const magazineSlotLabel: Record<MagazineImageSlot, string> = {
   conclusion: 'Closing Plate',
 };
 
-const buildMagazineImagePrompt = (result: AnalysisResult, slot: MagazineImageSlot): string => {
-  const cfg = getActiveConfig();
-  const keywords = result.keywords.map((keyword) => keyword.term).filter(Boolean).slice(0, 6).join(', ') || 'none';
-  const tensions = result.tensions.map((tension) => `${tension.title}: ${tension.content}`).filter(Boolean).slice(0, 3).join('\n') || 'none';
-  const voices = result.voices
-    .filter((voice) => voice.status !== 'failed')
-    .map((voice) => `${voice.name}: ${voice.oneLine || voice.stance}`)
+// Two-step image generation: ask the chat model to compress the finished
+// analysis into a concrete, photographable visual brief. We do this because
+// the image model cannot read Chinese philosophical concepts and otherwise
+// regresses to generic "philosophy magazine" fallbacks (book on desk, vague
+// light) that the user reads as "not connected to the article."
+const buildMagazineBriefUserMessage = (result: AnalysisResult, slot: MagazineImageSlot): string => {
+  // Keep the body short and conceptually rich. We deliberately omit voices
+  // and keywords lists: the brief writer needs the *tension*, not a roster.
+  const tensions = result.tensions
+    .map((tension) => `${tension.title}: ${tension.content}`)
     .filter(Boolean)
-    .slice(0, 5)
-    .join('\n') || 'none';
+    .slice(0, 3)
+    .join('\n') || '(not specified yet)';
+
   const slotInstruction = slot === 'cover'
-    ? 'Opening image: a strong magazine feature opener for the question, visualizing the central tension before the reader enters the voices.'
-    : 'Closing image: a reflective final plate for the synthesis, visualizing unresolved tension and a return to ordinary life.';
+    ? 'Slot: cover (opening plate). Capture the moment BEFORE the question is engaged — held tension, anticipation, something about to tip.'
+    : 'Slot: conclusion (closing plate). Capture the moment AFTER — partial resolution, return to ordinary objects with one detail subtly altered.';
+
+  const conclusionTail = slot === 'conclusion' && result.conclusion.summary
+    ? `\nConclusion (lived-with resolution): ${result.conclusion.summary}\nOpen question still hanging: ${result.conclusion.openQuestion || '(none)'}\nReturn to ordinary life: ${result.conclusion.realLifeReturn || '(none)'}`
+    : '';
 
   return [
-    'Create a refined philosophy magazine editorial image for a Chinese long-form analysis.',
     slotInstruction,
-    'No readable text, no Chinese characters, no subtitles, no typography, no logos, no UI.',
-    'Style: museum-editorial, quiet but vivid, sophisticated composition, realistic symbolic objects, tactile paper-and-light atmosphere, restrained colors, not fantasy art.',
-    'Composition: try for a horizontal editorial spread with generous negative space, but keep the central subject complete enough to survive responsive cropping. If the image model chooses a different fixed ratio, prioritize a complete, elegant magazine plate over exact aspect ratio.',
+    `Original user concern: ${result.topic}`,
+    `Article title (Chinese): ${result.philosophical_title}`,
+    `Central philosophical question (Chinese): ${result.questionFrame.bigQuestion}`,
+    `Plain translation of the question (Chinese): ${result.questionFrame.plainTranslation}`,
+    `Core tensions in the article:\n${tensions}`,
+    conclusionTail,
+    'Produce the visual brief now as JSON: { "brief": "..." }',
+  ].filter(Boolean).join('\n');
+};
+
+const generateMagazineImageBrief = async (
+  result: AnalysisResult,
+  slot: MagazineImageSlot,
+): Promise<string | null> => {
+  try {
+    const raw = await callChatJson<{ brief?: unknown }>(
+      [
+        { role: 'system', content: DEFAULT_MAGAZINE_IMAGE_BRIEF_SYSTEM_PROMPT },
+        { role: 'user',   content: buildMagazineBriefUserMessage(result, slot) },
+      ],
+      800,
+    );
+    const brief = typeof raw?.brief === 'string' ? raw.brief.trim() : '';
+    return brief.length >= 40 ? brief : null;
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    // Brief failures fall back to the legacy prompt — image still generates.
+    console.warn(`[sophia] magazine image brief failed: ${slot}`, error);
+    return null;
+  }
+};
+
+const buildMagazineImagePrompt = (result: AnalysisResult, slot: MagazineImageSlot, brief: string | null): string => {
+  const cfg = getActiveConfig();
+  const slotTone = slot === 'cover'
+    ? 'Editorial opening plate: held tension before the reader enters the article.'
+    : 'Editorial closing plate: partial resolution, a return to ordinary objects with one detail subtly altered.';
+
+  // When the brief succeeded it carries the entire visual subject — we frame
+  // it minimally. When the brief failed, fall back to a stripped-down version
+  // of the old prompt: just topic + title + tone (no voices / keywords list,
+  // which previously confused the image model).
+  if (brief) {
+    return [
+      'Refined philosophy magazine editorial image, executed from the visual brief below.',
+      slotTone,
+      `Visual brief: ${brief}`,
+      'Style: museum-editorial, restrained warm palette (paper ivory, walnut, soft shadow), tactile paper-and-light atmosphere, sophisticated composition, realistic symbolic objects, generous negative space; not fantasy art, not painterly cliche.',
+      'Composition: horizontal editorial spread; central subject complete enough to survive responsive cropping. If the image model enforces a fixed ratio, prioritize an elegant complete plate over exact aspect.',
+      'Strictly avoid: readable text, any Chinese characters, subtitles, typography, logos, watermarks, UI elements, human faces, recognizable people.',
+      `Configured image hint: ${cfg.avatarAspectHint}.`,
+      `Context (do not draw literally): article title is "${result.philosophical_title}".`,
+    ].filter(Boolean).join('\n');
+  }
+
+  // Fallback path: brief generation failed. Use a leaner version of the old
+  // prompt — still skip voices/keywords lists, since the user feedback was
+  // that the prior verbose prompt produced unrelated imagery.
+  return [
+    'Refined philosophy magazine editorial image for a Chinese long-form analysis.',
+    slotTone,
+    'Style: museum-editorial, restrained warm palette, tactile paper-and-light atmosphere, sophisticated composition, realistic symbolic objects, generous negative space; not fantasy art.',
+    'Composition: horizontal editorial spread; subject complete enough to survive responsive cropping.',
+    'Strictly avoid: readable text, any Chinese characters, subtitles, typography, logos, watermarks, UI elements, human faces.',
     `Configured image hint: ${cfg.avatarAspectHint}.`,
-    `User question: ${result.topic}`,
-    `Feature title: ${result.philosophical_title}`,
-    `Analytical mode: ${result.modeLabel}`,
-    `Introduction: ${result.introduction}`,
-    `Keywords: ${keywords}`,
-    `Thought voices:\n${voices}`,
-    `Tensions:\n${tensions}`,
-    slot === 'conclusion'
-      ? `Conclusion: ${result.conclusion.summary}\nOpen question: ${result.conclusion.openQuestion}\nReturn to life: ${result.conclusion.realLifeReturn}`
+    `Original concern (translate into one concrete physical scene, do not draw text): ${result.topic}`,
+    `Article title (Chinese, do not draw): ${result.philosophical_title}`,
+    `Central question (Chinese, translate into a physical posture, do not draw): ${result.questionFrame.bigQuestion}`,
+    slot === 'conclusion' && result.conclusion.summary
+      ? `Conclusion stance (translate into objects after the tension settles): ${result.conclusion.summary}`
       : '',
   ].filter(Boolean).join('\n');
 };
@@ -760,7 +825,6 @@ export const generateMagazineImage = async (
   slot: MagazineImageSlot,
 ): Promise<MagazineImageAsset> => {
   const cfg = getActiveConfig();
-  const prompt = buildMagazineImagePrompt(result, slot);
   const existingCtx = currentRunContext();
   const standaloneCtx = existingCtx
     ? null
@@ -773,11 +837,25 @@ export const generateMagazineImage = async (
   try {
     return await withStage('avatar', async () => {
       emitLog({ level: 'info', stage: 'avatar', message: `${label} 杂志配图开始生成。` });
+      // First step: ask the chat model to compress the analysis into a
+      // concrete visual brief. Cached separately so we don't pay this on a
+      // cache hit for the same brief+image pair.
+      emitLog({ level: 'detail', stage: 'avatar', message: `${label} 正在准备视觉简报。` });
+      const brief = await generateMagazineImageBrief(result, slot);
+      if (brief) {
+        emitLog({ level: 'detail', stage: 'avatar', message: `${label} 视觉简报已生成（${brief.length} 字符），交付给图像模型。` });
+      } else {
+        emitLog({ level: 'warn', stage: 'avatar', message: `${label} 视觉简报生成失败，回退到精简版直接 prompt。` });
+      }
+      const prompt = buildMagazineImagePrompt(result, slot, brief);
       return withStageCache<MagazineImageAsset>(
         'avatar',
         {
           kind: `magazine-${slot}`,
-          promptVersion: 1,
+          // promptVersion bumped to 2 when two-step brief generation landed;
+          // ensures pre-existing cached images get a fresh shot at being
+          // generated with the new, more grounded prompt.
+          promptVersion: 2,
           prompt,
           model: cfg.avatarImageModel,
           size: cfg.avatarImageSize,

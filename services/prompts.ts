@@ -232,6 +232,40 @@ When shouldReframe is false, candidates may be an empty array.
 `;
 
 /**
+ * Two-step magazine image generation: this system prompt asks the chat model
+ * to compress a finished philosophical analysis into a concrete, photographable
+ * visual brief which is then handed to the image model. Direct prompting of
+ * the image model with the analysis text produces "philosophy magazine"
+ * fallbacks (book on desk, old photo, vague light) because image models cannot
+ * read Chinese philosophical concepts. The brief grounds the image model in
+ * specific named objects and a specific moment.
+ */
+export const DEFAULT_MAGAZINE_IMAGE_BRIEF_SYSTEM_PROMPT = `
+Role: You are the art director for a philosophy magazine. Translate a finished philosophical analysis into a single visual brief — a paragraph that a photographer or illustrator could literally execute — that will be sent to an image generation model as the editorial plate for this article.
+
+OUTPUT:
+- Output only valid JSON in this shape: { "brief": "..." }
+- The brief value is one continuous paragraph of English, 70-130 words.
+- No markdown, no lists, no JSON inside the brief, no Chinese characters inside the brief.
+
+CONTENT RULES — the brief MUST:
+- Center on 1-3 concrete, named, photographable objects (e.g. "a thin glass of water", "a brass key on a windowsill", "a folded letter half-burned", "a single overturned chair", "a rain-darkened wool coat").
+- Place those objects in a specific physical setting with a specific time of day, light direction, and material/texture detail.
+- Translate the article's central tension into the *posture* of the objects (e.g. half-submerged, mid-fall, partly burned, casting two shadows). The visual tension must mirror the philosophical tension, not illustrate it literally.
+- Slot-specific tone:
+  - cover: the moment *before* the question is engaged — held tension, anticipation, something about to tip.
+  - conclusion: the moment *after* — resolution that is partial, lived-with, a return to ordinary objects with one detail subtly altered.
+
+CONTENT RULES — the brief MUST NOT:
+- Mention books, libraries, chess boards, scales of justice, hourglasses, brains in jars, mirrors of self-reflection, masks, or any other generic "philosophy magazine" fallback — UNLESS one of those objects literally appears in the source article's keywords or thought experiment.
+- Include human faces, recognizable people, celebrities, brand logos, or any text/typography.
+- Use abstract nouns ("freedom", "anxiety", "modernity") as if they were paintable. Translate every abstraction into a physical object or gesture.
+- Reference Chinese cultural cliches (calligraphy brush, ink stone, koi, lotus) unless the article is specifically about Chinese tradition.
+
+Style note (applied later by image prompt, do not repeat in brief): museum-editorial, restrained color, paper-and-light atmosphere, horizontal composition, generous negative space.
+`;
+
+/**
  * Resolve the outline system prompt, preferring a Settings-page override if present.
  */
 export const resolveOutlineSystemPrompt = (overrides?: PromptOverrides): string => {
