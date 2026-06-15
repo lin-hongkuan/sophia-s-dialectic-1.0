@@ -13,7 +13,7 @@
     "generate:demo-images": "node scripts/regenerate-preloaded-magazine-images.mjs",
     "generate:rubbing-artifacts": "node scripts/generate-rubbing-artifact-images.mjs",
     "preview": "vite preview",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm test && npm run typecheck && npm run build"
   },
