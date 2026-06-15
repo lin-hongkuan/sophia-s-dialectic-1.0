@@ -19,6 +19,7 @@ import { DEFAULT_ANALYSIS_PROFILE, exportSettings, importSettings, getActiveConf
 import { buildAnalysisProfileInstruction } from '../services/analysisProfile.ts';
 import { clearAll, exportCsv, flushNow, recordUsage } from '../services/tokenAccounting.ts';
 import { extractChatCompletionContent, parseChatCompletionResponseText } from '../services/api/apiClient.ts';
+import { ModelJsonParseError, parseModelJson } from '../services/jsonResponse.ts';
 import type { RunSnapshot } from '../types/storage.ts';
 
 const makeSnapshot = (partial: Partial<RunSnapshot>): RunSnapshot => ({
@@ -106,6 +107,27 @@ test('extracts text from array-style chat completion content', () => {
   }));
 
   assert.equal(extractChatCompletionContent(data), '{"answer":"yes"}');
+});
+
+test('recovers model JSON from markdown and prose wrappers', () => {
+  const parsed = parseModelJson<{ ok: boolean; items: number[] }>(
+    'Here is the JSON:\n**{"ok":true,"items":[1,2]}**\nThanks.',
+  );
+
+  assert.deepEqual(parsed, { ok: true, items: [1, 2] });
+});
+
+test('classifies unterminated model JSON as truncated', () => {
+  let thrown: unknown;
+  try {
+    parseModelJson('{"ok":true,"items":[1,2]');
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.ok(thrown instanceof ModelJsonParseError);
+  assert.equal(thrown.reason, 'truncated');
+  assert.match(thrown.preview, /"items"/);
 });
 
 test('rejects stale or malformed stage cache entries', () => {

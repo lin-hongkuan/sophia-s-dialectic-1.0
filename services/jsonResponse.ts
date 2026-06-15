@@ -26,9 +26,11 @@
  *   2. On failure, strip markdown decorations and find the first balanced
  *      object/array by walking the string (respecting string literals and
  *      escapes), then parse that slice.
- *   3. If everything fails, throw an error that includes a preview of the
- *      offending content so the surrounding stage's log entry is useful.
+ *   3. If everything fails, throw an error that includes a preview and a
+ *      reason, so callers can retry differently when the JSON was truncated.
  */
+
+export type ModelJsonParseReason = 'empty' | 'missing' | 'truncated' | 'invalid';
 
 /**
  * Thrown when the model's `message.content` can't be parsed as JSON, even
@@ -39,16 +41,18 @@
  */
 export class ModelJsonParseError extends Error {
   readonly preview: string;
-  constructor(message: string, preview: string) {
+  readonly reason: ModelJsonParseReason;
+  constructor(message: string, preview: string, reason: ModelJsonParseReason = 'invalid') {
     super(message);
     this.name = 'ModelJsonParseError';
     this.preview = preview;
+    this.reason = reason;
   }
 }
 
 export const parseModelJson = <T>(content: string): T => {
   if (typeof content !== 'string' || content.length === 0) {
-    throw new ModelJsonParseError('模型返回内容为空。', '');
+    throw new ModelJsonParseError('模型返回内容为空。', '', 'empty');
   }
 
   const trimmed = content.trim();
@@ -60,21 +64,25 @@ export const parseModelJson = <T>(content: string): T => {
     // fall through to recovery
   }
 
-  const candidate = extractJsonCandidate(trimmed);
-  if (candidate !== null) {
+  const extracted = extractJsonCandidate(trimmed);
+  if (extracted.candidate !== null) {
     try {
-      return JSON.parse(candidate) as T;
+      return JSON.parse(extracted.candidate) as T;
     } catch (error) {
-      const preview = previewOf(candidate);
+      const preview = previewOf(extracted.candidate);
       throw new ModelJsonParseError(
         `无法解析模型返回的 JSON（${(error as Error).message}）。候选片段：${preview}`,
         preview,
+        'invalid',
       );
     }
   }
 
   const preview = previewOf(trimmed);
-  throw new ModelJsonParseError(`模型返回的内容不像 JSON：${preview}`, preview);
+  if (extracted.reason === 'truncated') {
+    throw new ModelJsonParseError(`模型返回的 JSON 似乎被截断，未找到闭合括号。预览：${preview}`, preview, 'truncated');
+  }
+  throw new ModelJsonParseError(`模型返回的内容不像 JSON：${preview}`, preview, 'missing');
 };
 
 /**
@@ -99,7 +107,12 @@ const previewOf = (text: string): string => (
  * Returns null if no `{` or `[` is found, or if the structure is unterminated
  * (e.g. truncated by max_tokens).
  */
-const extractJsonCandidate = (input: string): string | null => {
+type JsonCandidateResult = {
+  candidate: string | null;
+  reason: 'missing' | 'truncated';
+};
+
+const extractJsonCandidate = (input: string): JsonCandidateResult => {
   let s = input;
 
   // 1. Strip a fenced code block if one wraps the payload. The lazy `*?`
@@ -127,7 +140,7 @@ const extractJsonCandidate = (input: string): string | null => {
   } else if (firstArr >= 0) {
     start = firstArr;
   } else {
-    return null;
+    return { candidate: null, reason: 'missing' };
   }
 
   // 4. Walk forward, respecting string literals and escape sequences, until
@@ -163,12 +176,12 @@ const extractJsonCandidate = (input: string): string | null => {
     } else if (ch === close) {
       depth -= 1;
       if (depth === 0) {
-        return s.slice(start, i + 1);
+        return { candidate: s.slice(start, i + 1), reason: 'missing' };
       }
     }
   }
 
   // Unterminated structure — likely cut off by max_tokens or a network
   // truncation. Surface as null so the caller gets a clean error message.
-  return null;
+  return { candidate: null, reason: 'truncated' };
 };

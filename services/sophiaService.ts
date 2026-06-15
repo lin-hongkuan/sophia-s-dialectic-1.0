@@ -300,6 +300,19 @@ export const generateThoughtVoiceAvatar = async (
 // Some providers (Grok we've seen in practice) ignore response_format hints and wrap
 // the JSON in **bold** or prepend prose; this clause is a stronger lever.
 const STRICT_JSON_REINFORCEMENT = '严格规则：仅输出一个有效的 JSON 对象。不要使用 Markdown 代码围栏（``` 或 ```json），不要加粗体（**）或斜体（*、_）修饰，不要在 JSON 前后添加任何文字、注释或致谢。整个回复必须能被 JSON.parse 直接解析。';
+const TRUNCATED_JSON_REINFORCEMENT = '上一轮 JSON 疑似被 max_tokens 截断。请保留要求的 JSON shape，但把长文本字段压到下限；优先保证所有字符串、数组和对象完整闭合。';
+const JSON_RETRY_MAX_TOKENS = 12000;
+
+const retryTokenBudgetForJson = (maxTokens: number, error: ModelJsonParseError): number => {
+  if (error.reason !== 'truncated') return maxTokens;
+  return Math.min(JSON_RETRY_MAX_TOKENS, Math.max(maxTokens + 2048, Math.ceil(maxTokens * 1.8)));
+};
+
+const reinforcementForJsonError = (error: ModelJsonParseError): string => (
+  error.reason === 'truncated'
+    ? `${STRICT_JSON_REINFORCEMENT}\n${TRUNCATED_JSON_REINFORCEMENT}`
+    : STRICT_JSON_REINFORCEMENT
+);
 
 const callChatJsonOnce = async <T>(
   messages: ChatMessage[],
@@ -327,11 +340,23 @@ const callChatJsonOnce = async <T>(
   const text = await response.text();
   const data = parseChatCompletionResponseText(text);
   recordUsageFromResponse(data?.usage);
+  const finishReason = typeof data?.choices?.[0]?.finish_reason === 'string' ? data.choices[0].finish_reason : '';
   const content = extractChatCompletionContent(data);
   if (!content) {
-    throw new ModelJsonParseError('苏菲没有回应。API 返回数据格式异常。', '');
+    throw new ModelJsonParseError('苏菲没有回应。API 返回数据格式异常。', '', 'empty');
   }
-  return parseJson<T>(content);
+  try {
+    return parseJson<T>(content);
+  } catch (error) {
+    if (error instanceof ModelJsonParseError && finishReason === 'length') {
+      throw new ModelJsonParseError(
+        `${error.message} 上游 finish_reason=length，响应很可能在 JSON 闭合前被截断。`,
+        error.preview,
+        'truncated',
+      );
+    }
+    throw error;
+  }
 };
 
 const callChatJson = async <T>(messages: ChatMessage[], maxTokens = 4096): Promise<T> => {
@@ -343,10 +368,16 @@ const callChatJson = async <T>(messages: ChatMessage[], maxTokens = 4096): Promi
     // system message that forbids markdown, then surface the upstream error for
     // diagnosis if even that fails.
     // eslint-disable-next-line no-console
-    console.warn('[sophia][chat-json] retrying with stricter prompt after parse failure:', error.message);
-    const reinforced = [...messages, { role: 'system' as const, content: STRICT_JSON_REINFORCEMENT }];
+    const retryMaxTokens = retryTokenBudgetForJson(maxTokens, error);
+    console.warn('[sophia][chat-json] retrying after parse failure:', {
+      reason: error.reason,
+      maxTokens,
+      retryMaxTokens,
+      message: error.message,
+    });
+    const reinforced = [...messages, { role: 'system' as const, content: reinforcementForJsonError(error) }];
     try {
-      return await callChatJsonOnce<T>(reinforced, maxTokens, 'chat-json-strict');
+      return await callChatJsonOnce<T>(reinforced, retryMaxTokens, error.reason === 'truncated' ? 'chat-json-expanded' : 'chat-json-strict');
     } catch (retryError) {
       if (retryError instanceof ModelJsonParseError) {
         throw new Error(
@@ -610,7 +641,7 @@ const generateOutline = async (topic: string, continuationContext?: Continuation
 
 voicePlans 选择 2-5 个，必须足够贴题。不要生成 routeMap.nextQuestion；继续追问统一放到 followUps。如果 mode 是 thought_experiment 或 thought_experiment_panel，必须生成 thoughtExperiment，且 responseMap.voiceId 必须匹配 voicePlans 的 id。`,
       },
-    ], 3500),
+    ], 6500),
     { onHit: () => emitLog({ level: 'detail', stage: 'outline', message: '命中阶段缓存：outline 直接返回上次结果。' }) },
   );
 
