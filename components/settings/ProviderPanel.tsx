@@ -74,7 +74,7 @@ export const ProviderPanel: React.FC<ProviderPanelProps> = ({
       <SectionHeader
         icon={<Cpu className="h-4 w-4" />}
         title="生成模型"
-        description="在预置模型间切换，或填入你自己的 OpenAI-compatible 网关。生图模型保留默认（grok-imagine-image-lite），不进入运行时切换。"
+        description="在预置模型间切换，或填入你自己的 OpenAI-compatible 网关。生图默认走 OpenRouter chat/completions 图片模式（gpt-image-2）。"
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -122,7 +122,7 @@ export const ProviderPanel: React.FC<ProviderPanelProps> = ({
                 value={settings.customProvider.imageModel ?? ''}
                 onChange={(e) => onCustomChange({ imageModel: e.target.value })}
                 className="mt-1 w-full rounded border border-museum-200 bg-white px-3 py-2 font-mono text-sm focus:border-museum-700 focus:outline-none"
-                placeholder="grok-imagine-image-lite"
+                placeholder="gpt-image-2"
               />
             </label>
             <label className="block md:col-span-2">

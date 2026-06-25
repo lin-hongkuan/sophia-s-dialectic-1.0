@@ -45,7 +45,7 @@ Sophia's Dialectic 是一个用 Vite + React 18 构建的「哲学问题生成�
 - **任意输入 → 完整辩证分析**：标题、导言、问题翻译、关键词、阅读结构、论证路线图、长篇思想声音、张力、综合判断、延伸追问。
 - **多种分析路径**：层层深入 / 圆桌辩论 / 历史谱系 / 两难困境 / 概念考古 / 思想实验 / 流派研讨会 / 哲学门诊 / 思想实验出路 / 自由编排，由模型按问题自动选路。
 - **5 种思想声音类型**：哲学家（philosopher）、流派（school）、概念（concept）、立场（position）、当代批评者（contemporary）。
-- **思想头像生成**：每位思想声音同步生成一张博物馆肖像风格的头像（OpenAI-compatible `/images/generations`），与正文并行流式产出。
+- **思想头像生成**：每位思想声音同步生成一张博物馆肖像风格的头像（优先 OpenRouter/NewAPI `chat/completions` 图片模式，失败后再兼容 `/responses` 与 `/images/generations`），与正文并行流式产出。
 - **流式生成**：所有长文走 SSE 流式，App 端做 120ms 节流；流式中断会自动回退到非流式重试。
 - **并发可调**：同一份分析里多位思想声音并发生成（默认 3 路，可在 Settings 调到 1-5）。
 
@@ -153,7 +153,7 @@ npm run dev
 | --- | --- | --- |
 | `SOPHIA_API_BASE_URL` | `https://api.linhongkuan.com/v1` | API 基础地址。结尾不要带 `/`。 |
 | `SOPHIA_API_MODEL` | `gpt-5.4-mini` | 默认文本模型；当某个 preset 的专属变量未设置时也会回退到它。 |
-| `SOPHIA_IMAGE_MODEL` | `grok-imagine-image-lite` | 思想头像生图模型。 |
+| `SOPHIA_IMAGE_MODEL` | `gpt-image-2` | 思想头像生图模型。默认经 OpenRouter/NewAPI 的 chat/completions 图片模式返回 `message.images[]`。 |
 | `SOPHIA_IMAGE_SIZE` | `1024x1024` | 头像生图尺寸。 |
 | `SOPHIA_IMAGE_ASPECT_HINT` | `portrait 1:1.2 aspect ratio` | 拼到头像 prompt 末尾的画幅提示。 |
 | `SOPHIA_API_PROVIDER` | `OpenAI-compatible` | 仅出现在错误提示文案里的供应商展示名。 |
@@ -167,7 +167,7 @@ npm run dev
 SOPHIA_API_KEY=sk-your-real-key
 SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
 SOPHIA_API_MODEL=gpt-5.4-mini
-SOPHIA_IMAGE_MODEL=grok-imagine-image-lite
+SOPHIA_IMAGE_MODEL=gpt-image-2
 SOPHIA_API_PROVIDER=OpenAI-compatible
 
 # 可选：设置后 Settings 页相应 preset 卡可点击；不设置则显示为"未配置"。
@@ -292,7 +292,7 @@ App 用 `window.history` 实现客户端路由，所有路径都被 GH Pages 的
 2. **route**：单次 JSON 调用补全论证路线图（每个节点 plain + philosophical 各 120-220 字）。
 3. **voices**：`runWithConcurrency` 按 Settings 设置的并发数并发跑每位声音。每位声音内部并行做：
     - 流式长文（`callChatText` + SSE，120ms 节流回到 React）。
-    - 头像生图（`/images/generations`，base64）。
+    - 头像生图（优先 `chat/completions` 图片模式，兼容 `/responses` 与 `/images/generations`）。
     - 完成后再来一次小型 JSON 调用，提炼 `summaryForSynthesis` / `quote` / `challenges`。
 4. **synthesis**：合并所有声音摘要，单次 JSON 调用产出 `tensions` / `keywords` / `followUps` / `conclusion`。
 5. **done**：合成最终 `AnalysisResult`，App 写入历史。
@@ -377,7 +377,7 @@ export const ANNOUNCEMENT: Announcement = {
 | --- | --- | --- |
 | `SOPHIA_API_BASE_URL` | `https://api.linhongkuan.com/v1` | API 地址 |
 | `SOPHIA_API_MODEL` | `gpt-5.4-mini` | 默认文本模型 |
-| `SOPHIA_IMAGE_MODEL` | `grok-imagine-image-lite` | 头像生图模型 |
+| `SOPHIA_IMAGE_MODEL` | `gpt-image-2` | 头像生图模型 |
 | `SOPHIA_API_PROVIDER` | `OpenAI-compatible` | 错误提示展示名 |
 | `SOPHIA_PRESET_GPT_MODEL` | _空_ | Settings GPT preset 模型 |
 | `SOPHIA_PRESET_MIMO_MODEL` | _空_ | Settings MiMo preset 模型 |

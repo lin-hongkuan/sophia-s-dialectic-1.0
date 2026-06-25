@@ -108,6 +108,10 @@ test('extracts image payloads from OpenAI-compatible image and chat wrappers', (
     extractGeneratedImageUrl({ choices: [{ message: { content: [{ type: 'text', text: `done data:image/png;base64,${'b'.repeat(256)}` }] } }] }),
     `data:image/png;base64,${'b'.repeat(256)}`,
   );
+  assert.equal(
+    extractGeneratedImageUrl({ choices: [{ message: { images: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${'c'.repeat(256)}` } }] } }] }),
+    `data:image/png;base64,${'c'.repeat(256)}`,
+  );
 });
 
 test('extracts text from array-style chat completion content', () => {

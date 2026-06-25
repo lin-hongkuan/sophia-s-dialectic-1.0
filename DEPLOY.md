@@ -14,7 +14,7 @@ npm ci
 SOPHIA_API_KEY=your_key_here
 SOPHIA_API_BASE_URL=https://api.linhongkuan.com/v1
 SOPHIA_API_MODEL=gpt-5.4-mini
-SOPHIA_IMAGE_MODEL=grok-imagine-image-lite
+SOPHIA_IMAGE_MODEL=gpt-image-2
 SOPHIA_IMAGE_SIZE=1024x1024
 SOPHIA_IMAGE_ASPECT_HINT=portrait 1:1.2 aspect ratio
 SOPHIA_API_PROVIDER=OpenAI-compatible
@@ -61,7 +61,7 @@ npm run preview
 | --- | --- | --- |
 | `SOPHIA_API_BASE_URL` | `https://api.linhongkuan.com/v1` | OpenAI-compatible API 地址 |
 | `SOPHIA_API_MODEL` | `gpt-5.4-mini` | 文本生成模型 |
-| `SOPHIA_IMAGE_MODEL` | `grok-imagine-image-lite` | 生图模型 |
+| `SOPHIA_IMAGE_MODEL` | `gpt-image-2` | 生图模型，默认经 OpenRouter/NewAPI 的 chat/completions 图片模式返回 `message.images[]`。 |
 | `SOPHIA_API_PROVIDER` | `OpenAI-compatible` | 页面错误提示里的供应商名称 |
 
 如果不配置 Variables，workflow 会使用上面的默认值。

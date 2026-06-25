@@ -91,7 +91,7 @@ const DEFAULT_CUSTOM_PROVIDER: CustomProvider = {
   baseUrl: process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1',
   apiKey: '',
   textModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
-  imageModel: process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite',
+  imageModel: process.env.SOPHIA_IMAGE_MODEL || 'gpt-image-2',
 };
 
 export const DEFAULT_SETTINGS: SophiaSettings = {
@@ -117,7 +117,7 @@ const ENV_BASELINE = {
   apiBaseUrl: normalizeBaseUrl(process.env.SOPHIA_API_BASE_URL, 'https://api.linhongkuan.com/v1'),
   apiModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
   apiProvider: process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible',
-  avatarImageModel: process.env.SOPHIA_IMAGE_MODEL || 'grok-imagine-image-lite',
+  avatarImageModel: process.env.SOPHIA_IMAGE_MODEL || 'gpt-image-2',
   avatarImageSize: process.env.SOPHIA_IMAGE_SIZE || '1024x1024',
   avatarAspectHint: process.env.SOPHIA_IMAGE_ASPECT_HINT || 'portrait 1:1.2 aspect ratio',
   presetGpt: process.env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_API_MODEL || '',

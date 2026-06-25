@@ -19,6 +19,7 @@ export const requestHeaders = () => {
 
 export const chatEndpoint = () => `${getActiveConfig().apiBaseUrl}/chat/completions`;
 export const imageEndpoint = () => `${getActiveConfig().apiBaseUrl}/images/generations`;
+export const responsesEndpoint = () => `${getActiveConfig().apiBaseUrl}/responses`;
 
 const textFromContentPart = (part: unknown): string => {
   if (typeof part === 'string') return part;
