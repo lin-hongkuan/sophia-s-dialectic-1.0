@@ -142,39 +142,135 @@ const waitForImageRetry = (ms: number, signal?: AbortSignal) => new Promise<void
   signal?.addEventListener('abort', onAbort, { once: true });
 });
 
+const normalizeImageDataUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (/^data:image\//i.test(trimmed)) return trimmed;
+  return `data:image/png;base64,${trimmed}`;
+};
+
+export const extractGeneratedImageUrl = (payload: unknown): string => {
+  const visited = new Set<unknown>();
+  const candidates: string[] = [];
+
+  const visit = (value: unknown): void => {
+    if (!value) return;
+    if (typeof value === 'string') {
+      candidates.push(value);
+      return;
+    }
+    if (typeof value !== 'object' || visited.has(value)) return;
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    for (const key of ['url', 'image_url', 'b64_json', 'content', 'text']) {
+      visit(record[key]);
+    }
+    for (const key of ['data', 'choices', 'message', 'delta', 'images', 'output', 'result']) {
+      visit(record[key]);
+    }
+  };
+
+  visit(payload);
+
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+
+    const dataUrlMatch = trimmed.match(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n_-]+/i);
+    if (dataUrlMatch?.[0]) return dataUrlMatch[0].replace(/\s+/g, '');
+
+    const markdownImageMatch = trimmed.match(/!\[[^\]]*\]\(([^)]+)\)/);
+    if (markdownImageMatch?.[1]) {
+      const url = markdownImageMatch[1].trim();
+      if (/^https?:\/\//i.test(url) || /^data:image\//i.test(url)) return url;
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+    // Plain base64 image payloads are common in OpenAI-compatible wrappers.
+    if (/^[A-Za-z0-9+/=\r\n_-]{256,}$/.test(trimmed)) return normalizeImageDataUrl(trimmed.replace(/\s+/g, ''));
+  }
+
+  return '';
+};
+
+const callImagesGenerationEndpoint = async (prompt: string, signal?: AbortSignal): Promise<string> => {
+  const cfg = getActiveConfig();
+  const response = await fetchWithRetry(imageEndpoint(), {
+    method: 'POST',
+    headers: requestHeaders(),
+    body: JSON.stringify({
+      model: cfg.avatarImageModel,
+      prompt,
+      n: 1,
+      size: cfg.avatarImageSize,
+      response_format: 'b64_json',
+    }),
+  }, { timeoutMs: 120000, maxAttempts: 1, label: 'avatar-image', signal });
+
+  if (!response.ok) {
+    throw new ImageGenerationError(await apiErrorMessage(response), {
+      status: response.status,
+      retryable: isRetryableImageStatus(response.status),
+    });
+  }
+
+  const data = await response.json().catch(() => ({} as any));
+  recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
+  const imageUrl = extractGeneratedImageUrl(data);
+  if (imageUrl) return imageUrl;
+  throw new Error(`${cfg.apiProvider} 图片接口未返回可用图像。`);
+};
+
+const callChatCompletionImageFallback = async (prompt: string, signal?: AbortSignal): Promise<string> => {
+  const cfg = getActiveConfig();
+  const response = await fetchWithRetry(chatEndpoint(), {
+    method: 'POST',
+    headers: requestHeaders(),
+    body: JSON.stringify({
+      model: cfg.avatarImageModel,
+      messages: [
+        { role: 'system', content: 'Generate exactly one image from the user prompt. Return only the image URL, data URL, or Markdown image link. Do not add explanation.' },
+        { role: 'user', content: prompt },
+      ],
+      stream: false,
+    }),
+  }, { timeoutMs: 180000, maxAttempts: 1, label: 'avatar-image-chat-fallback', signal });
+
+  if (!response.ok) {
+    throw new ImageGenerationError(await apiErrorMessage(response), {
+      status: response.status,
+      retryable: isRetryableImageStatus(response.status),
+    });
+  }
+
+  const data = await response.json().catch(() => ({} as any));
+  recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
+  const imageUrl = extractGeneratedImageUrl(data);
+  if (imageUrl) return imageUrl;
+  throw new Error(`${cfg.apiProvider} 聊天式图片接口未返回可用图像。`);
+};
+
 const callAvatarImageRequest = async (prompt: string, signal?: AbortSignal): Promise<string> => {
   await acquireAvatarSlot();
   try {
     const cfg = getActiveConfig();
-    const response = await fetchWithRetry(imageEndpoint(), {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        model: cfg.avatarImageModel,
-        prompt,
-        n: 1,
-        size: cfg.avatarImageSize,
-        response_format: 'b64_json',
-      }),
-    }, { timeoutMs: 120000, maxAttempts: 1, label: 'avatar-image', signal });
-
-    if (!response.ok) {
-      throw new ImageGenerationError(await apiErrorMessage(response), {
-        status: response.status,
-        retryable: isRetryableImageStatus(response.status),
-      });
+    try {
+      return await callImagesGenerationEndpoint(prompt, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const retryable = !(error instanceof ImageGenerationError) || error.retryable;
+      if (!retryable) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[sophia][avatar-image] /images/generations failed, trying chat-completions fallback: ${reason}`);
+      emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} 图片端点不可用，切换到聊天式图片兼容模式。` });
+      return await callChatCompletionImageFallback(prompt, signal);
     }
-
-    const data = await response.json().catch(() => ({} as any));
-    recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
-    const item = data?.data?.[0];
-    if (item?.b64_json) {
-      return `data:image/png;base64,${item.b64_json}`;
-    }
-    if (typeof item?.url === 'string' && item.url) {
-      return item.url;
-    }
-    throw new Error(`${cfg.apiProvider} 图片接口未返回可用图像。`);
   } finally {
     releaseAvatarSlot();
   }

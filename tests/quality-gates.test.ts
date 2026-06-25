@@ -20,6 +20,7 @@ import { buildAnalysisProfileInstruction } from '../services/analysisProfile.ts'
 import { clearAll, exportCsv, flushNow, recordUsage } from '../services/tokenAccounting.ts';
 import { extractChatCompletionContent, parseChatCompletionResponseText } from '../services/api/apiClient.ts';
 import { ModelJsonParseError, parseModelJson } from '../services/jsonResponse.ts';
+import { extractGeneratedImageUrl } from '../services/sophiaService.ts';
 import type { RunSnapshot } from '../types/storage.ts';
 
 const makeSnapshot = (partial: Partial<RunSnapshot>): RunSnapshot => ({
@@ -92,6 +93,21 @@ test('normalizes SSE chat completions returned to non-streaming callers', () => 
   assert.equal(extractChatCompletionContent(data), '{"ok":true}');
   assert.equal(data.usage.total_tokens, 3);
   assert.equal(data.choices[0].finish_reason, 'stop');
+});
+
+test('extracts image payloads from OpenAI-compatible image and chat wrappers', () => {
+  assert.equal(
+    extractGeneratedImageUrl({ data: [{ b64_json: 'a'.repeat(256) }] }),
+    `data:image/png;base64,${'a'.repeat(256)}`,
+  );
+  assert.equal(
+    extractGeneratedImageUrl({ choices: [{ message: { content: '![image](https://cdn.example.test/image.png)' } }] }),
+    'https://cdn.example.test/image.png',
+  );
+  assert.equal(
+    extractGeneratedImageUrl({ choices: [{ message: { content: [{ type: 'text', text: `done data:image/png;base64,${'b'.repeat(256)}` }] } }] }),
+    `data:image/png;base64,${'b'.repeat(256)}`,
+  );
 });
 
 test('extracts text from array-style chat completion content', () => {
