@@ -121,6 +121,15 @@ const isAbortError = (error: unknown): boolean => error instanceof Error && erro
 const isRetryableImageStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
 
+const shouldTryNextImageRoute = (error: unknown): boolean => {
+  if (!(error instanceof ImageGenerationError)) return true;
+  // Auth and explicit permission/quota failures won't be fixed by changing endpoint shape.
+  if (error.status === 401 || error.status === 403) return false;
+  // 400/404/422 are common OpenAI-compatible gateway incompatibilities for one image route
+  // while another route or payload shape may still work.
+  return true;
+};
+
 const computeImageRetryDelayMs = (retryIndex: number): number => {
   const base = 1000 * Math.pow(2, retryIndex);
   const jitter = Math.floor(Math.random() * 500);
@@ -168,10 +177,15 @@ export const extractGeneratedImageUrl = (payload: unknown): string => {
     }
 
     const record = value as Record<string, unknown>;
-    for (const key of ['url', 'image_url', 'b64_json', 'content', 'text', 'output_text']) {
+    // OpenAI Responses and NewAPI-compatible gateways use several image shapes:
+    // - output[].type === 'image_generation_call' with result/base64/url
+    // - output[].content[].type === 'output_image' with image_url/url/b64_json
+    // - output_text/text/content strings containing a URL, markdown image, or data URL.
+    // Walk explicit image/text fields first so a real image beats nearby prompt text.
+    for (const key of ['url', 'image_url', 'b64_json', 'base64', 'result', 'content', 'text', 'output_text']) {
       visit(record[key]);
     }
-    for (const key of ['data', 'choices', 'message', 'delta', 'images', 'output', 'result']) {
+    for (const key of ['data', 'choices', 'message', 'delta', 'images', 'output']) {
       visit(record[key]);
     }
   };
@@ -230,29 +244,58 @@ const callChatCompletionsImageEndpoint = async (prompt: string, signal?: AbortSi
 
 const callResponsesImageEndpoint = async (prompt: string, signal?: AbortSignal): Promise<string> => {
   const cfg = getActiveConfig();
-  const response = await fetchWithRetry(responsesEndpoint(), {
-    method: 'POST',
-    headers: requestHeaders(),
-    body: JSON.stringify({
-      model: cfg.avatarImageModel,
-      input: prompt,
-      modalities: ['image'],
-      size: cfg.avatarImageSize,
-    }),
-  }, { timeoutMs: 180000, maxAttempts: 1, label: 'avatar-image-responses', signal });
+  const payloads: Array<{ label: string; body: Record<string, unknown> }> = [
+    {
+      label: 'avatar-image-responses-tool',
+      body: {
+        model: cfg.avatarImageModel,
+        input: prompt,
+        tools: [{
+          type: 'image_generation',
+          size: cfg.avatarImageSize,
+        }],
+      },
+    },
+    {
+      label: 'avatar-image-responses-modalities',
+      body: {
+        model: cfg.avatarImageModel,
+        input: prompt,
+        modalities: ['image'],
+        size: cfg.avatarImageSize,
+      },
+    },
+  ];
 
-  if (!response.ok) {
-    throw new ImageGenerationError(await apiErrorMessage(response), {
-      status: response.status,
-      retryable: isRetryableImageStatus(response.status),
-    });
+  let lastError: unknown = null;
+  for (const payload of payloads) {
+    try {
+      const response = await fetchWithRetry(responsesEndpoint(), {
+        method: 'POST',
+        headers: requestHeaders(),
+        body: JSON.stringify(payload.body),
+      }, { timeoutMs: 180000, maxAttempts: 1, label: payload.label, signal });
+
+      if (!response.ok) {
+        throw new ImageGenerationError(await apiErrorMessage(response), {
+          status: response.status,
+          retryable: isRetryableImageStatus(response.status),
+        });
+      }
+
+      const data = await response.json().catch(() => ({} as any));
+      recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
+      const imageUrl = extractGeneratedImageUrl(data);
+      if (imageUrl) return imageUrl;
+      throw new Error(`${cfg.apiProvider} responses 图片接口未返回可用图像。`);
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted || !shouldTryNextImageRoute(error)) throw error;
+      console.warn(`[sophia][avatar-image] ${payload.label} failed, trying next Responses image payload: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  const data = await response.json().catch(() => ({} as any));
-  recordUsageFromResponse(data?.usage, cfg.avatarImageModel);
-  const imageUrl = extractGeneratedImageUrl(data);
-  if (imageUrl) return imageUrl;
-  throw new Error(`${cfg.apiProvider} responses 图片接口未返回可用图像。`);
+  throw lastError ?? new Error(`${cfg.apiProvider} responses 图片接口未返回可用图像。`);
 };
 
 const callImagesGenerationEndpoint = async (prompt: string, signal?: AbortSignal): Promise<string> => {
@@ -317,29 +360,26 @@ const callAvatarImageRequest = async (prompt: string, signal?: AbortSignal): Pro
   try {
     const cfg = getActiveConfig();
     try {
-      return await callChatCompletionsImageEndpoint(prompt, signal);
-    } catch (chatImageError) {
-      if (signal?.aborted) throw chatImageError;
-      const chatImageRetryable = !(chatImageError instanceof ImageGenerationError) || chatImageError.retryable;
-      if (!chatImageRetryable) throw chatImageError;
-      const chatImageReason = chatImageError instanceof Error ? chatImageError.message : String(chatImageError);
-      console.warn(`[sophia][avatar-image] /chat/completions image mode failed, trying /responses: ${chatImageReason}`);
-      emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} chat/completions 图片模式不可用，切换到 Responses 图片模式。` });
+      return await callResponsesImageEndpoint(prompt, signal);
+    } catch (responsesError) {
+      if (signal?.aborted) throw responsesError;
+      if (!shouldTryNextImageRoute(responsesError)) throw responsesError;
+      const responsesReason = responsesError instanceof Error ? responsesError.message : String(responsesError);
+      console.warn(`[sophia][avatar-image] /responses failed, trying /chat/completions image mode: ${responsesReason}`);
+      emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} Responses 图片模式不可用，切换到 chat/completions 图片模式。` });
       try {
-        return await callResponsesImageEndpoint(prompt, signal);
-      } catch (responsesError) {
-        if (signal?.aborted) throw responsesError;
-        const responsesRetryable = !(responsesError instanceof ImageGenerationError) || responsesError.retryable;
-        if (!responsesRetryable) throw responsesError;
-        const responsesReason = responsesError instanceof Error ? responsesError.message : String(responsesError);
-        console.warn(`[sophia][avatar-image] /responses failed, trying /images/generations: ${responsesReason}`);
-        emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} Responses 图片模式不可用，切换到旧版图片端点。` });
+        return await callChatCompletionsImageEndpoint(prompt, signal);
+      } catch (chatImageError) {
+        if (signal?.aborted) throw chatImageError;
+        if (!shouldTryNextImageRoute(chatImageError)) throw chatImageError;
+        const chatImageReason = chatImageError instanceof Error ? chatImageError.message : String(chatImageError);
+        console.warn(`[sophia][avatar-image] /chat/completions image mode failed, trying /images/generations: ${chatImageReason}`);
+        emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} chat/completions 图片模式不可用，切换到旧版图片端点。` });
         try {
           return await callImagesGenerationEndpoint(prompt, signal);
         } catch (legacyError) {
           if (signal?.aborted) throw legacyError;
-          const legacyRetryable = !(legacyError instanceof ImageGenerationError) || legacyError.retryable;
-          if (!legacyRetryable) throw legacyError;
+          if (!shouldTryNextImageRoute(legacyError)) throw legacyError;
           const legacyReason = legacyError instanceof Error ? legacyError.message : String(legacyError);
           console.warn(`[sophia][avatar-image] /images/generations failed, trying text-compatible fallback: ${legacyReason}`);
           emitLog({ level: 'detail', stage: 'avatar', message: `${cfg.apiProvider} 旧版图片端点不可用，尝试文本兼容图片返回。` });
