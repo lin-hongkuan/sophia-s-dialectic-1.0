@@ -90,7 +90,7 @@ const DEFAULT_CUSTOM_PROVIDER: CustomProvider = {
   name: '自定义 LLM',
   baseUrl: process.env.SOPHIA_API_BASE_URL || 'https://api.linhongkuan.com/v1',
   apiKey: '',
-  textModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
+  textModel: process.env.SOPHIA_API_MODEL || 'gpt-5.6-luna',
   imageModel: process.env.SOPHIA_IMAGE_MODEL || 'gpt-image-2',
 };
 
@@ -115,7 +115,7 @@ const normalizeBaseUrl = (value: unknown, fallback: string) => trimOrFallback(va
 const ENV_BASELINE = {
   apiKey: process.env.SOPHIA_API_KEY || '',
   apiBaseUrl: normalizeBaseUrl(process.env.SOPHIA_API_BASE_URL, 'https://api.linhongkuan.com/v1'),
-  apiModel: process.env.SOPHIA_API_MODEL || 'gpt-5.4-mini',
+  apiModel: process.env.SOPHIA_API_MODEL || 'gpt-5.6-luna',
   apiProvider: process.env.SOPHIA_API_PROVIDER || 'OpenAI-compatible',
   avatarImageModel: process.env.SOPHIA_IMAGE_MODEL || 'gpt-image-2',
   avatarImageSize: process.env.SOPHIA_IMAGE_SIZE || '1024x1024',
