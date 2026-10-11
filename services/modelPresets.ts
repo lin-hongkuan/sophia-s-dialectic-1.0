@@ -20,7 +20,7 @@ export interface ModelPreset {
   hint: string;
 }
 
-const presetGptModel = process.env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_API_MODEL || 'gpt-6-luna';
+const presetGptModel = 'gpt-6-luna';
 const presetMimoModel = process.env.SOPHIA_PRESET_MIMO_MODEL || '';
 const presetGrokModel = process.env.SOPHIA_PRESET_GROK_MODEL || '';
 

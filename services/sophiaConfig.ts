@@ -315,7 +315,7 @@ export const getActiveConfig = (): ResolvedSophiaConfig => {
   return {
     apiKey: ENV_BASELINE.apiKey,
     apiBaseUrl: ENV_BASELINE.apiBaseUrl,
-    apiModel: presetModel || ENV_BASELINE.apiModel,
+    apiModel: process.env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_API_MODEL || 'gpt-6-luna',
     apiProvider: ENV_BASELINE.apiProvider,
     avatarImageModel: ENV_BASELINE.avatarImageModel,
     avatarImageSize: ENV_BASELINE.avatarImageSize,
