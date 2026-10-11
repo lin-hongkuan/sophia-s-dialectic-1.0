@@ -20,7 +20,7 @@ export interface ModelPreset {
   hint: string;
 }
 
-const presetGptModel = process.env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_API_MODEL || '';
+const presetGptModel = process.env.SOPHIA_PRESET_GPT_MODEL || process.env.SOPHIA_API_MODEL || 'gpt-6-luna';
 const presetMimoModel = process.env.SOPHIA_PRESET_MIMO_MODEL || '';
 const presetGrokModel = process.env.SOPHIA_PRESET_GROK_MODEL || '';
 
@@ -30,7 +30,7 @@ export const MODEL_PRESETS: ModelPreset[] = [
     label: 'GPT',
     modelName: presetGptModel,
     configured: presetGptModel.length > 0,
-    hint: '请在 GitHub Variables 中设置 SOPHIA_PRESET_GPT_MODEL（或 .env.local 中的 SOPHIA_API_MODEL）后重新部署。',
+    hint: '模型名默认 gpt-6-luna；可通过 GitHub Variables 中的 SOPHIA_PRESET_GPT_MODEL 覆盖。',
   },
   {
     id: 'preset:mimo',
